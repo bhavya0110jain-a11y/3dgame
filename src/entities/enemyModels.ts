@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { EnemyShape } from '../data/enemies';
+import { getModel } from '../render/Assets';
 
 const ni = (g: THREE.BufferGeometry) => (g.index ? g.toNonIndexed() : g);
 const merge = (gs: THREE.BufferGeometry[]) => mergeGeometries(gs.map(ni));
@@ -13,7 +14,15 @@ function eyes(y: number, z: number, spread: number, size: number): THREE.BufferG
 }
 
 /** Returns body + eye geometry for a shape. Models face +Z, sit on y=0, unit scale ~1 unit tall. */
-export function buildEnemyModel(shape: EnemyShape): { body: THREE.BufferGeometry; eyes: THREE.BufferGeometry } {
+export function buildEnemyModel(shape: EnemyShape): { body: THREE.BufferGeometry; eyes: THREE.BufferGeometry; vertexColors: boolean } {
+  const m = getModel(shape);
+  if (m && m.body) {
+    return { body: m.body, eyes: m.glow ?? new THREE.BufferGeometry(), vertexColors: true };
+  }
+  return { ...buildProcedural(shape), vertexColors: false };
+}
+
+function buildProcedural(shape: EnemyShape): { body: THREE.BufferGeometry; eyes: THREE.BufferGeometry } {
   switch (shape) {
     case 'shade':
       return {

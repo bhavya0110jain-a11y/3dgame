@@ -166,3 +166,7 @@ html, body { margin: 0; height: 100%; background: #05060a; overflow: hidden; col
   .up-card { min-height: 0; }
   .panel { padding: 18px 14px; }
 }
+.boot-loader { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: #05060a; pointer-events: auto; }
+.boot-title { font-family: var(--font-display); font-size: 42px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold); text-shadow: 0 0 22px rgba(255,150,50,0.6); }
+.boot-track { width: min(320px, 70vw); height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
+.boot-fill { height: 100%; background: var(--gold); transform-origin: left; transform: scaleX(0); transition: transform 0.2s; }

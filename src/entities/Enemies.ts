@@ -36,6 +36,8 @@ export interface Enemy {
 
 interface Batch {
   def: EnemyDef;
+  /** Base instance tint: white when the model carries its own vertex colours. */
+  tint: number;
   body: THREE.InstancedMesh;
   eyes: THREE.InstancedMesh;
   capacity: number;
@@ -80,9 +82,11 @@ export class EnemyManager {
     if (b) return b;
     const model = buildEnemyModel(def.shape);
     const capacity = def.boss ? 4 : def.id === 'shade' || def.id === 'wisp' || def.id === 'crawler' ? 700 : 300;
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, metalness: 0.1, flatShading: true });
-    const eyeMat = new THREE.MeshBasicMaterial({ color: def.eyeColor });
-    eyeMat.color.multiplyScalar(2.5);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, metalness: 0.1, flatShading: !model.vertexColors, vertexColors: model.vertexColors });
+    const eyeMat = model.vertexColors
+      ? new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true })
+      : new THREE.MeshBasicMaterial({ color: def.eyeColor });
+    if (!model.vertexColors) eyeMat.color.multiplyScalar(2.5);
     const body = new THREE.InstancedMesh(model.body, bodyMat, capacity);
     body.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
     body.count = 0;
@@ -91,7 +95,7 @@ export class EnemyManager {
     eyes.count = 0;
     eyes.frustumCulled = false;
     this.scene.add(body, eyes);
-    b = { def, body, eyes, capacity };
+    b = { def, tint: model.vertexColors ? 0xffffff : def.color, body, eyes, capacity };
     this.batches.set(def.id, b);
     return b;
   }
@@ -496,7 +500,7 @@ export class EnemyManager {
       tmpM.compose(tmpP, tmpQ, tmpS);
       b.body.setMatrixAt(i, tmpM);
       b.eyes.setMatrixAt(i, tmpM);
-      tmpC.setHex(e.def.color);
+      tmpC.setHex(b.tint);
       if (e.elite) tmpC.lerp(new THREE.Color(0x6a3a10), 0.5);
       if (e.hitFlash > 0) {
         const f = e.hitFlash;
