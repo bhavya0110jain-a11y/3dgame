@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Director, PHASES, RUN_LENGTH, hpScale, damageScale } from '../../src/game/Director';
+import { Director, PHASES, RUN_LENGTH, hpScale, damageScale, PRESSURE_HP } from '../../src/game/Director';
 import { ENEMIES } from '../../src/data/enemies';
 import { BIOMES, getBiome } from '../../src/data/biomes';
 import { RunState } from '../../src/game/RunState';
@@ -19,6 +19,7 @@ function harness(biomeId: string, lifetime = 6, seed = 1) {
   const events: string[] = [];
   const enemies = {
     hpMul: 1, damageMul: 1, speedMul: 1, activeCount: 0, boss: null as unknown,
+    knockbackAll() {},
     spawn(id: string, x: number, z: number, opts: { elite?: boolean; hpMul?: number } = {}) {
       const def = ENEMIES[id];
       if (!def) return null;
@@ -31,7 +32,8 @@ function harness(biomeId: string, lifetime = 6, seed = 1) {
   const ctx = {
     run, rng: new Rng(seed), enemies,
     world: { biome: getBiome(biomeId) },
-    player: { x: 0, z: 0, vx: 0, vz: 0 },
+    player: { x: 0, z: 0, vx: 0, vz: 0, lightValue: 100, heal() {} },
+    pickups: { list: [] },
     fx: { text() {} },
     events: { emit: (type: string) => events.push(type) },
     shake() {},
@@ -179,7 +181,9 @@ describe('Director simulated 15-minute run', () => {
     const h = harness('biome_ruins');
     h.step(600);
     const diff = getBiome('biome_ruins').difficulty;
-    expect(h.enemies.hpMul).toBeCloseTo(diff * hpScale(h.run.elapsed / 60), 4);
+    // Sprint 2: adaptive pressure also thickens enemies (PRESSURE_HP per point above 1)
+    const pressureHp = 1 + (h.director.pressure - 1) * PRESSURE_HP;
+    expect(h.enemies.hpMul).toBeCloseTo(diff * hpScale(h.run.elapsed / 60) * pressureHp, 4);
     expect(h.enemies.damageMul).toBeCloseTo(diff * damageScale(h.run.elapsed / 60), 4);
     expect(h.enemies.speedMul).toBeLessThanOrEqual(1.25);
   });

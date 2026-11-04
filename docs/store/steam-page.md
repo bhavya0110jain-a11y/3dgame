@@ -126,19 +126,22 @@ holding 60 fps on the Deck.
 
 ## Store assets checklist (Steamworks → Store Page → Graphical Assets)
 
-| Asset | Size (px) | Content | Source |
+All files are generated **from the game** by `node tools/package-screens.mjs` into `production/release/store-art/`
+(see `docs/store/README.md`). Regenerate after visual changes, then upload.
+
+| Asset | Size (px) | Content | File (`production/release/store-art/…`) |
 |---|---|---|---|
-| Header capsule | 920×430 | Logo + bearer with lantern + swarm silhouette | key art, `press-kit.md` §5 |
-| Small capsule | 462×174 | Logo only, high contrast (must read at 120 px wide) | key art crop |
-| Main capsule | 1232×706 | Full key art + logo | key art |
-| Vertical capsule | 748×896 | Bearer + lantern pool, logo top | key art |
-| Page background | 1438×810 | Soft moonlit field, low contrast, no text | gameplay capture, blurred |
-| Library capsule | 600×900 | Vertical key art + logo | key art |
-| Library hero | 3840×1240 | Wide key art, **no logo** | key art |
-| Library logo | 1280×720 (transparent PNG) | "Last Lantern" wordmark | logo file |
-| Event cover / header | 800×450 / 1920×622 | Per announcement | — |
-| Screenshots | ≥ 1920×1080, 5 minimum (aim for 10) | `press-kit.md` §6 capture plan | in-game capture |
-| Trailer | 1080p60 MP4, ≤ 2 min | `trailer-script.md` | capture + edit |
+| Header capsule | 920×430 | Logo over the in-engine key art (bearer, moon, advancing shadows) | `capsules/steam-header-920x430.png` |
+| Small capsule | 462×174 | Logo only, large (reads at 120 px wide) | `capsules/steam-small-capsule-462x174.png` |
+| Main capsule | 1232×706 | Key art + logo + tagline | `capsules/steam-main-capsule-1232x706.png` |
+| Vertical capsule | 748×896 | Bearer + lantern pool, logo top | `capsules/steam-vertical-capsule-748x896.png` |
+| Page background | 1438×810 | Ashen Ruins fight, darkened, no text | `capsules/steam-page-background-1438x810.png` |
+| Library capsule | 600×900 | Vertical key art + logo | `capsules/steam-library-capsule-600x900.png` |
+| Library hero | 3840×1240 | Wide key art, **no logo** (rendered natively at 3840×1240) | `capsules/steam-library-hero-3840x1240.png` |
+| Library logo | 1280×720 (transparent PNG) | "Last Lantern" wordmark | `capsules/steam-library-logo-1280x720.png` |
+| Event cover / header | 800×450 / 1920×622 | Per announcement | crop `capsules/key-art-1920x1080.png` / `steam-library-hero-1920x620.png` |
+| Screenshots | 1920×1080, 10 | `press-kit.md` §6 plan, HUD on | `screens/01-title.png` … `screens/10-hearth.png` |
+| Trailer | 1080p60 MP4, ≤ 2 min | `trailer-script.md` | raw: `capture/gameplay.mp4`; final edit on a real GPU |
 
 Capsule rules (Valve, 2026): capsules show only the game's name and artwork. No review quotes, award laurels, "sale"
 or "new" text, and no discount badges.

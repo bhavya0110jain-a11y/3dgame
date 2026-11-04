@@ -36,7 +36,10 @@ async function scenario(cfg) {
   // --- run + god mode + no director (static enemy count)
   if (g.state !== 'playing') g.startRun();
   g.director.update = () => {};
-  g.player.invuln = 1e9;
+  // god mode via a no-op damage(): invuln > 0.4 makes Player.update blink the bearer group (and its lantern light /
+  // cube shadow) off every other 50 ms, which skewed triangle / draw-call counts and screenshots before sprint 2.
+  g.player.invuln = 0;
+  g.player.damage = () => {};
   g.debug.timeScale = 1;
   g.enemies.clear();
   g.pickups.clear();
@@ -167,7 +170,6 @@ try {
       await ctx.addInitScript(saveInitScript(qaSave({ settings: { ...qaSave().settings, quality } })));
       const page = await ctx.newPage();
       page.setDefaultTimeout(180_000);
-  page.setDefaultTimeout(180_000);
       page.on('pageerror', (e) => errors.push(String(e)));
       page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
       await page.goto(server.url);

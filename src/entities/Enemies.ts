@@ -1,7 +1,19 @@
 import * as THREE from 'three';
 import { ENEMIES, type EnemyDef } from '../data/enemies';
 import { SpatialHash } from '../core/SpatialHash';
-import { buildEnemyModel, makeEnemyBodyMaterial, withEnemyFx, poseEnemy, poseQuaternion, POSE_SCRATCH, ENEMY_FX_ATTR } from './enemyModels';
+import {
+  buildEnemyModel,
+  buildEnemyLodModel,
+  makeEnemyBodyMaterial,
+  makeEnemyGlowMaterial,
+  withEnemyFx,
+  poseEnemy,
+  poseQuaternion,
+  POSE_SCRATCH,
+  DEATH_TIME,
+  BOSS_DEATH_TIME,
+  type EnemyModel,
+} from './enemyModels';
 import type { GameContext } from '../game/types';
 
 export interface Enemy {
@@ -43,7 +55,15 @@ export interface Enemy {
   aux2: number;
   enraged: boolean;
   lastPattern: number;
+  /** Seconds since spawn (drives the rise-from-the-ground spawn animation). */
+  age: number;
+  /** Seconds into the death animation; -1 while alive. Dying enemies are already inactive (no collision,
+   *  targeting or damage) and are only kept around for rendering until the animation ends. */
+  dying: number;
 }
+
+/** Render quality tier (matches Renderer's Quality / save.settings.quality). */
+export type EnemyRenderQuality = 'low' | 'medium' | 'high';
 
 /** Delayed area attack (boss eruptions, slams, rain; exploder blasts). Pooled, no per-frame allocation. */
 interface Hazard {
@@ -58,14 +78,35 @@ interface Hazard {
 
 type TelegraphFx = { telegraph?: (x: number, z: number, r: number, dur: number, color: number) => void };
 
+/** One drawable LOD of an enemy type: lit body + unlit glow, sharing one per-instance FX attribute. */
+interface BatchPart {
+  body: THREE.InstancedMesh;
+  eyes: THREE.InstancedMesh;
+  fx: THREE.InstancedBufferAttribute;
+}
+
 interface Batch {
   def: EnemyDef;
   /** Base instance tint: white when the model carries its own vertex colours. */
   tint: number;
-  body: THREE.InstancedMesh;
-  eyes: THREE.InstancedMesh;
+  hi: BatchPart;
+  /** Horde LOD (~800 triangles); null for bosses / procedural fallbacks. */
+  lo: BatchPart | null;
+  /** The part written this frame (the other one is drawn with count 0). */
+  cur: BatchPart;
   capacity: number;
+  /** Write cursor for this frame. */
+  n: number;
 }
+
+/**
+ * Horde LOD policy. Regular enemies draw their ~800-triangle `_lo` model on the low/medium tiers, and on high
+ * once the horde is big (with hysteresis so the swap doesn't flicker around the threshold). Bosses always
+ * draw the full model. Enemy bodies cast the moon shadow on the high tier only and never cast into the
+ * lantern's cube shadow (Lighting.LANTERN_SHADOW_LAYER; enemies stay on layer 0).
+ */
+export const HORDE_LOD_ON = 170;
+export const HORDE_LOD_OFF = 130;
 
 export interface DamageOpts {
   knockback?: number; // impulse strength
@@ -97,33 +138,88 @@ export class EnemyManager {
   boss: Enemy | null = null;
   private lastWardCallout = -10;
   private hazards: Hazard[] = Array.from({ length: 64 }, () => ({ active: false, x: 0, z: 0, r: 0, t: 0, damage: 0, color: 0 }));
-  private sharedBodyMat = new Map<string, THREE.MeshStandardMaterial>();
+  /** Enemies playing their death animation (inactive; returned to the pool when it ends). */
+  private dyingList: Enemy[] = [];
+  /** Render tier override (Game can feed renderer.effectiveQuality here); null = save.settings.quality. */
+  renderQuality: EnemyRenderQuality | null = null;
+  private appliedQuality: EnemyRenderQuality | null = null;
+  private hordeLod = false;
 
   constructor(private scene: THREE.Scene) {
     for (const def of Object.values(ENEMIES)) this.ensureBatch(def);
+  }
+
+  private makePart(def: EnemyDef, model: EnemyModel, capacity: number): BatchPart {
+    // Body: vertex-coloured lit material with moonlit rim + per-instance FX (hit flash, elite, slow, burn).
+    const bodyMat = makeEnemyBodyMaterial(model.vertexColors);
+    const eyeMat = model.vertexColors ? makeEnemyGlowMaterial(true) : makeEnemyGlowMaterial(false, def.eyeColor);
+    if (!model.vertexColors) eyeMat.color.multiplyScalar(2.5);
+    const bodyGeo = withEnemyFx(model.body, capacity);
+    const fx = bodyGeo.getAttribute('aFx') as THREE.InstancedBufferAttribute;
+    const body = new THREE.InstancedMesh(bodyGeo, bodyMat, capacity);
+    body.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
+    body.count = 0;
+    body.frustumCulled = false;
+    body.castShadow = false;
+    body.receiveShadow = false;
+    const eyes = new THREE.InstancedMesh(withEnemyFx(model.eyes, capacity, fx), eyeMat, capacity);
+    eyes.count = 0;
+    eyes.frustumCulled = false;
+    eyes.castShadow = false;
+    this.scene.add(body, eyes);
+    return { body, eyes, fx };
+  }
+
+  /** Total triangles the enemy batches will draw this frame (main pass only) - perf probes. */
+  drawnTriangles(): number {
+    let n = 0;
+    const tri = (m: THREE.InstancedMesh) => {
+      const g = m.geometry;
+      const c = g.index ? g.index.count : g.attributes.position?.count ?? 0;
+      return (c / 3) * m.count;
+    };
+    for (const b of this.batches.values()) for (const p of [b.hi, b.lo]) if (p) n += tri(p.body) + tri(p.eyes);
+    return n;
+  }
+
+  /** True while regular enemies are drawn with their horde LOD. */
+  get usingHordeLod(): boolean {
+    return this.hordeLod;
+  }
+
+  private updateLod(ctx: GameContext): void {
+    const q: EnemyRenderQuality = this.renderQuality ?? (ctx.save?.settings?.quality as EnemyRenderQuality | undefined) ?? 'high';
+    const n = this.activeCount + this.dyingList.length;
+    if (q !== 'high') this.hordeLod = true;
+    else this.hordeLod = this.hordeLod ? n > HORDE_LOD_OFF : n > HORDE_LOD_ON;
+    if (q !== this.appliedQuality) {
+      this.appliedQuality = q;
+      const cast = q === 'high';
+      for (const b of this.batches.values()) {
+        b.hi.body.castShadow = cast;
+        if (b.lo) b.lo.body.castShadow = cast;
+      }
+    }
+    for (const b of this.batches.values()) {
+      const want = this.hordeLod && b.lo ? b.lo : b.hi;
+      if (want !== b.cur) {
+        b.cur.body.count = 0;
+        b.cur.eyes.count = 0;
+        b.cur = want;
+      }
+    }
   }
 
   private ensureBatch(def: EnemyDef): Batch {
     let b = this.batches.get(def.id);
     if (b) return b;
     const model = buildEnemyModel(def.shape);
-    const capacity = def.boss ? 4 : def.id === 'shade' || def.id === 'wisp' || def.id === 'crawler' ? 700 : 300;
-    // Body: vertex-coloured lit material with moonlit rim + per-instance FX (hit flash, elite, slow, burn).
-    const bodyMat = makeEnemyBodyMaterial(model.vertexColors);
-    const eyeMat = model.vertexColors
-      ? new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true })
-      : new THREE.MeshBasicMaterial({ color: def.eyeColor });
-    if (!model.vertexColors) eyeMat.color.multiplyScalar(2.5);
-    const body = new THREE.InstancedMesh(withEnemyFx(model.body, capacity), bodyMat, capacity);
-    body.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
-    body.count = 0;
-    body.frustumCulled = false;
-    body.castShadow = true;
-    const eyes = new THREE.InstancedMesh(model.eyes, eyeMat, capacity);
-    eyes.count = 0;
-    eyes.frustumCulled = false;
-    this.scene.add(body, eyes);
-    b = { def, tint: model.vertexColors ? 0xffffff : def.color, body, eyes, capacity };
+    // + headroom for corpses still playing their death animation
+    const capacity = (def.boss ? 4 : def.id === 'shade' || def.id === 'wisp' || def.id === 'crawler' ? 700 : 300) + (def.boss ? 2 : 48);
+    const hi = this.makePart(def, model, capacity);
+    const loModel = def.boss ? null : buildEnemyLodModel(def.shape);
+    const lo = loModel ? this.makePart(def, loModel, capacity) : null;
+    b = { def, tint: model.vertexColors ? 0xffffff : def.color, hi, lo, cur: hi, capacity, n: 0 };
     this.batches.set(def.id, b);
     return b;
   }
@@ -134,7 +230,7 @@ export class EnemyManager {
     const batch = this.ensureBatch(def);
     let countOfType = 0;
     for (const e of this.list) if (e.active && e.def === def) countOfType++;
-    if (countOfType >= batch.capacity) return null;
+    if (countOfType >= batch.capacity - (def.boss ? 2 : 48)) return null;
     const e: Enemy =
       this.free.pop() ??
       ({ hitCd: new Map() } as unknown as Enemy);
@@ -174,6 +270,8 @@ export class EnemyManager {
       aux2: 0,
       enraged: false,
       lastPattern: -1,
+      age: 0,
+      dying: -1,
     });
     if (def.boss) e.timer = 2.5;
     e.hitCd.clear();
@@ -187,15 +285,24 @@ export class EnemyManager {
   clear(): void {
     for (const e of this.list) {
       e.active = false;
+      e.dying = -1;
+      this.free.push(e);
+    }
+    for (const e of this.dyingList) {
+      e.dying = -1;
       this.free.push(e);
     }
     this.list.length = 0;
+    this.dyingList.length = 0;
     this.boss = null;
     for (const h of this.hazards) h.active = false;
     this.lastWardCallout = -10;
     for (const b of this.batches.values()) {
-      b.body.count = 0;
-      b.eyes.count = 0;
+      for (const p of [b.hi, b.lo]) {
+        if (!p) continue;
+        p.body.count = 0;
+        p.eyes.count = 0;
+      }
     }
   }
 
@@ -303,6 +410,7 @@ export class EnemyManager {
   kill(e: Enemy, ctx: GameContext, source = 'other'): void {
     if (!e.active) return;
     e.active = false;
+    e.dying = 0; // death animation (render only; see writeInstances)
     const run = ctx.run;
     run.kills++;
     run.killsBySource.set(source, (run.killsBySource.get(source) ?? 0) + 1);
@@ -320,6 +428,7 @@ export class EnemyManager {
           c.kbx = Math.cos(a) * 7;
           c.kbz = Math.sin(a) * 7;
           c.hitFlash = 1;
+          c.age = 0.2; // pops out of the burst instead of rising from the ground
         }
       }
       ctx.fx.burst(e.x, 0.6, e.z, def.eyeColor, 16, 5, 0.5, 0.35);
@@ -404,9 +513,22 @@ export class EnemyManager {
     for (let i = 0; i < this.list.length; i++) {
       const e = this.list[i];
       if (e.active) this.list[w++] = e;
+      else if (e.dying >= 0) this.dyingList.push(e);
       else this.free.push(e);
     }
     this.list.length = w;
+    // advance death animations; finished corpses go back to the pool
+    let dw = 0;
+    for (let i = 0; i < this.dyingList.length; i++) {
+      const e = this.dyingList[i];
+      e.dying += dt;
+      if (e.dying < (e.def.boss ? BOSS_DEATH_TIME : DEATH_TIME)) this.dyingList[dw++] = e;
+      else {
+        e.dying = -1;
+        this.free.push(e);
+      }
+    }
+    this.dyingList.length = dw;
     this.activeCount = w;
     if (w > ctx.run.peakEnemies) ctx.run.peakEnemies = w;
     this.hash.clear();
@@ -417,6 +539,7 @@ export class EnemyManager {
       if (!e.active) continue;
       const def = e.def;
       e.phase += dt;
+      e.age += dt;
       e.stateTime += dt;
       e.sinceHit += dt;
       if (e.hitFlash > 0) e.hitFlash = Math.max(0, e.hitFlash - dt * 6);
@@ -600,6 +723,7 @@ export class EnemyManager {
       }
     }
 
+    this.updateLod(ctx);
     this.writeInstances(time);
   }
 
@@ -794,40 +918,41 @@ export class EnemyManager {
   }
 
   private writeInstances(time: number): void {
-    // body.count doubles as the per-batch write cursor (no per-frame Map allocation)
-    for (const b of this.batches.values()) b.body.count = 0;
-    const pose = POSE_SCRATCH;
-    for (const e of this.list) {
-      if (!e.active) continue;
-      const b = this.batches.get(e.def.id)!;
-      const i = b.body.count;
-      if (i >= b.capacity) continue;
-      b.body.count = i + 1;
-      poseEnemy(e, pose);
-      const s = e.scale;
-      tmpP.set(e.x, pose.y * s, e.z);
-      poseQuaternion(e.facing, pose, tmpQ);
-      tmpS.set(s * pose.sx, s * pose.sy, s * pose.sz);
-      tmpM.compose(tmpP, tmpQ, tmpS);
-      b.body.setMatrixAt(i, tmpM);
-      b.eyes.setMatrixAt(i, tmpM);
-      // base tint (white for vertex-coloured GLB models); elites run slightly warmer
-      tmpC.setHex(b.tint);
-      if (e.elite) tmpC.multiplyScalar(1.08).offsetHSL(0.02, 0.05, 0);
-      b.body.setColorAt(i, tmpC);
-      const fx = b.body.geometry.getAttribute(ENEMY_FX_ATTR) as THREE.InstancedBufferAttribute | undefined;
-      if (fx) {
-        const burn = e.burnTimer > 0 ? 0.65 + 0.35 * Math.sin(time * 14 + e.id) : 0;
-        fx.setXYZW(i, e.hitFlash, e.elite ? 0.75 + 0.25 * Math.sin(time * 4 + e.id) : 0, e.slowTimer > 0 ? 1 : 0, burn);
-      }
-    }
+    // per-batch write cursor (no per-frame Map allocation)
+    for (const b of this.batches.values()) b.n = 0;
+    for (const e of this.list) if (e.active) this.writeOne(e, time);
+    for (const e of this.dyingList) this.writeOne(e, time);
     for (const b of this.batches.values()) {
-      b.eyes.count = b.body.count;
-      b.body.instanceMatrix.needsUpdate = true;
-      b.eyes.instanceMatrix.needsUpdate = true;
-      if (b.body.instanceColor) b.body.instanceColor.needsUpdate = true;
-      const fx = b.body.geometry.getAttribute(ENEMY_FX_ATTR);
-      if (fx) fx.needsUpdate = true;
+      const p = b.cur;
+      p.body.count = b.n;
+      p.eyes.count = b.n;
+      p.body.instanceMatrix.needsUpdate = true;
+      p.eyes.instanceMatrix.needsUpdate = true;
+      if (p.body.instanceColor) p.body.instanceColor.needsUpdate = true;
+      p.fx.needsUpdate = true;
     }
+  }
+
+  private writeOne(e: Enemy, time: number): void {
+    const b = this.batches.get(e.def.id)!;
+    const i = b.n;
+    if (i >= b.capacity) return;
+    b.n = i + 1;
+    const p = b.cur;
+    const pose = poseEnemy(e, POSE_SCRATCH);
+    const s = e.scale;
+    tmpP.set(e.x, pose.y * s, e.z);
+    poseQuaternion(e.facing, pose, tmpQ);
+    tmpS.set(s * pose.sx, s * pose.sy, s * pose.sz);
+    tmpM.compose(tmpP, tmpQ, tmpS);
+    p.body.setMatrixAt(i, tmpM);
+    p.eyes.setMatrixAt(i, tmpM);
+    // base tint (white for vertex-coloured GLB models); elites run slightly warmer
+    tmpC.setHex(b.tint);
+    if (e.elite) tmpC.multiplyScalar(1.08).offsetHSL(0.02, 0.05, 0);
+    p.body.setColorAt(i, tmpC);
+    const alive = e.dying < 0;
+    const burn = alive && e.burnTimer > 0 ? 0.65 + 0.35 * Math.sin(time * 14 + e.id) : 0;
+    p.fx.setXYZW(i, pose.flash, e.elite ? 0.75 + 0.25 * Math.sin(time * 4 + e.id) : 0, alive && e.slowTimer > 0 ? 1 : 0, burn);
   }
 }

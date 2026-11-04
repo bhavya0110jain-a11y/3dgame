@@ -63,6 +63,18 @@ Object.assign(P, {
   hearth: '<path fill-rule="evenodd" d="M2 21.5V10.2L12 2.5l10 7.7v11.3zM6.5 21.5v-5.2a5.5 5.5 0 0 1 11 0v5.2z"/><path d="M12 12.6c1.4 1.8 2.6 3.2 2.6 5a2.6 2.6 0 0 1-5.2 0c0-1.8 1.2-3.2 2.6-5z"/>',
 });
 
+// Sprint 2 UI icons (reliquary, dawn, rarity shapes for colour-blind-safe cues)
+Object.assign(P, {
+  sun: '<circle cx="12" cy="12" r="4.6"/><path d="M12 1.5v3.2M12 19.3v3.2M1.5 12h3.2M19.3 12h3.2M4.6 4.6l2.3 2.3M17.1 17.1l2.3 2.3M4.6 19.4l2.3-2.3M17.1 6.9l2.3-2.3" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/>',
+  chest: '<path d="M3 10.5V8a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v2.5z"/><path d="M3 12h18v7.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5zm7 1.5v3.2h4v-3.2z"/>',
+  'rar-weapon': '<path d="M12 2.5 21.5 12 12 21.5 2.5 12z"/>',
+  'rar-relic': '<circle cx="12" cy="12" r="8.5"/>',
+  'rar-evo': '<path d="M12 1.5l3.1 7.1 7.4.6-5.6 4.9 1.7 7.4L12 17.6l-6.6 3.9 1.7-7.4-5.6-4.9 7.4-.6z"/>',
+  'rar-boon': '<path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"/>',
+  'rar-ash': '<path d="M12 2 20.7 7v10L12 22l-8.7-5V7z"/>',
+  stick: '<circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="5"/><path d="M12 .8 9.8 3.2h4.4zM12 23.2l-2.2-2.4h4.4zM.8 12l2.4-2.2v4.4zM23.2 12l-2.4-2.2v4.4z"/>',
+});
+
 export function icon(name: string, cls = ''): string {
   const body = P[name] ?? P.star;
   return `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${body}</svg>`;

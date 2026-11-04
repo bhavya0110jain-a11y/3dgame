@@ -43,6 +43,8 @@ export class ParticleSystem {
   private geo: THREE.InstancedBufferGeometry;
   private attrs: THREE.InstancedBufferAttribute[];
   private seed = 1;
+  /** Brightness governor for additive particles (FxManager lowers it when the screen is crowded with light). */
+  gain = 1;
 
   constructor(scene: THREE.Scene, capacity = 4000) {
     this.capacity = capacity;
@@ -239,7 +241,7 @@ export class ParticleSystem {
       const fi = d[o + FADEIN];
       let alpha = fi > 0 && t < fi ? t / fi : 1;
       alpha *= flags & PF_SOFTFADE ? Math.pow(1 - t, 0.6) : Math.pow(1 - t, 1.4);
-      let inten = d[o + INT];
+      let inten = d[o + INT] * (d[o + ADD] > 0.5 ? this.gain : 1);
       if (flags & PF_FLICKER) inten *= 0.75 + 0.5 * this.rand();
       P[j] = d[o + X]; P[j + 1] = d[o + Y]; P[j + 2] = d[o + Z]; P[j + 3] = size;
       V[j] = d[o + VX]; V[j + 1] = d[o + VY]; V[j + 2] = d[o + VZ]; V[j + 3] = d[o + STRETCH];

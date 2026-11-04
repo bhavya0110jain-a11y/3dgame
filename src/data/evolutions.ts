@@ -1,8 +1,7 @@
-import * as THREE from 'three';
 import type { GameContext, WeaponDef, WeaponInstance } from '../game/types';
 import type { Enemy } from '../entities/Enemies';
 import type { Projectile } from '../entities/Projectiles';
-import { TimedWeapon, MeshPool, glowMaterial } from './weaponKit';
+import { TimedWeapon } from './weaponKit';
 
 /*
  * Evolved forms of the seven launch weapons. Granted by a reliquary when the base weapon is max level and the paired
@@ -24,8 +23,7 @@ class SunspearVolley extends TimedWeapon {
     const r = 1.4 * Math.sqrt(ctx.run.stats.area);
     const x = e.x;
     const z = e.z;
-    ctx.fx.ring(x, z, 0xfff0a0, 0.2, r, 0.22);
-    ctx.fx.burst(x, 1, z, 0xffd27a, 8, 5, 0.3, 0.3);
+    ctx.fx.sunBurst(x, z, r);
     ctx.enemies.forEachInRadius(x, z, r, (o) => {
       if (o !== e) ctx.enemies.damage(o, p.damage * 0.4, ctx, { knockback: 3, fromX: x, fromZ: z, source: this.def.id, canCrit: false });
     });
@@ -50,6 +48,7 @@ class SunspearVolley extends TimedWeapon {
         trail: 1, onHit: this.burstAt,
       });
     }
+    ctx.fx.sunVolley(p.x, p.z, Math.cos(base), Math.sin(base));
     ctx.events.emit('weapon:fired', { weaponId: 'ember_bolt' });
   }
 }
@@ -58,7 +57,8 @@ class SunspearVolley extends TimedWeapon {
 class SolarCrown implements WeaponInstance {
   level = 1;
   private angle = 0;
-  private pool: MeshPool;
+  /** ribbon-trail ids, one per orb (visual) */
+  private trails: number[] = [];
   private ctxRef!: GameContext;
   private ox = 0;
   private oz = 0;
@@ -72,9 +72,7 @@ class SolarCrown implements WeaponInstance {
     e.burnDps = Math.max(e.burnDps, this.dmg * 0.5);
     e.burnSource = this.def.id;
   };
-  constructor(readonly def: WeaponDef, ctx: GameContext) {
-    this.pool = new MeshPool(ctx.scene, new THREE.IcosahedronGeometry(0.36, 2), glowMaterial(0xffc04a, 3.2));
-  }
+  constructor(readonly def: WeaponDef, _ctx: GameContext) {}
   update(dt: number, ctx: GameContext): void {
     this.ctxRef = ctx;
     const s = ctx.run.stats;
@@ -83,7 +81,16 @@ class SolarCrown implements WeaponInstance {
     this.angle += (3.2 / Math.max(0.4, s.cooldown)) * dt;
     const rings: [number, number, number][] = RINGS;
     const hitR = 0.6 * s.area;
-    this.pool.begin();
+    // visuals: one golden ribbon per orb (re-allocated when the orb count changes)
+    let total = 0;
+    for (let r = 0; r < rings.length; r++) total += rings[r][0] + s.amount;
+    if (this.trails.length !== total) {
+      while (this.trails.length < total) this.trails.push(ctx.fx.ribbons.alloc(0xffa830, 0.45 * Math.sqrt(s.area), 1.5));
+      while (this.trails.length > total) ctx.fx.ribbons.release(this.trails.pop()!);
+      for (const t of this.trails) ctx.fx.ribbons.reset(t);
+    }
+    let k = 0;
+    const vs = Math.sqrt(s.area);
     for (let r = 0; r < rings.length; r++) {
       const [n0, radius0, dir] = rings[r];
       const n = n0 + s.amount;
@@ -92,17 +99,18 @@ class SolarCrown implements WeaponInstance {
         const a = this.angle * dir + (i / n) * Math.PI * 2;
         this.ox = p.x + Math.cos(a) * radius;
         this.oz = p.z + Math.sin(a) * radius;
-        const m = this.pool.next();
-        m.position.set(this.ox, 1.0 + Math.sin(a * 3) * 0.12, this.oz);
-        m.scale.setScalar(Math.sqrt(s.area));
+        const oy = 1.0 + Math.sin(a * 3) * 0.12;
+        ctx.fx.sunOrb(this.ox, oy, this.oz, vs, dt, a * 0.7 * dir);
+        const t = this.trails[k++];
+        if (t >= 0) ctx.fx.ribbons.push(t, this.ox, oy, this.oz);
         if (Math.random() < 0.25) ctx.fx.spark(this.ox, 1, this.oz, 0, 0.8, 0, 0xffa030, 0.35, 0.35);
         ctx.enemies.forEachInRadius(this.ox, this.oz, hitR, this.onTouch);
       }
     }
-    this.pool.end();
   }
-  dispose(): void {
-    this.pool.dispose();
+  dispose(ctx: GameContext): void {
+    for (const t of this.trails) if (t >= 0) ctx.fx.ribbons.release(t);
+    this.trails.length = 0;
   }
 }
 const RINGS: [number, number, number][] = [
@@ -135,9 +143,7 @@ class Dawnbreak extends TimedWeapon {
     this.dmg = 70 * s.might * mul;
     this.healed = 0;
     this.ctxRef = ctx;
-    ctx.fx.ring(p.x, p.z, 0xfff4c0, 0.5, r, 0.45);
-    ctx.fx.ring(p.x, p.z, 0xffb04a, 0.3, r * 0.7, 0.35);
-    ctx.fx.burst(p.x, 0.6, p.z, 0xfff0a0, 34, r * 2, 0.4, 0.35, 0);
+    ctx.fx.dawnPulse(p.x, p.z, r, mul < 1);
     ctx.enemies.forEachInRadius(p.x, p.z, r, this.onHit);
     ctx.events.emit('weapon:fired', { weaponId: 'flare_nova' });
   }
@@ -151,84 +157,44 @@ class Dawnbreak extends TimedWeapon {
       this.echo -= dt;
       if (this.echo <= 0) this.pulse(ctx, 0.6);
     }
+    // anticipation: light gathers inward over the last 0.35 s before the next sunrise
+    const lead = 0.35;
+    if (this.cd < lead && this.echo <= 0) ctx.fx.dawnGather(ctx.player.x, ctx.player.z, 7 * ctx.run.stats.area, 1 - Math.max(0, this.cd) / lead);
   }
 }
 
 // ---------------------------------------------------------------- Tempest Choir
 class TempestChoir extends TimedWeapon {
-  private lines: { line: THREE.Line; life: number; pts: Float32Array }[] = [];
   private hit = new Set<number>();
-  private mat = new THREE.LineBasicMaterial({ color: new THREE.Color(0xc0e8ff).multiplyScalar(3.5), transparent: true });
   baseCooldown() {
     return 0.85;
   }
   fire(ctx: GameContext): void {
     const s = ctx.run.stats;
-    const jumps = 12 + s.amount;
+    const jumps = 9 + s.amount; // S2 balance: 12 → 9 (outlier: 1.3M dmg/run in balance-sim)
     const dmg = 40 * s.might;
     const p = ctx.player;
     for (let k = 0; k < 3; k++) {
       let cur = ctx.enemies.randomInRange(p.x, p.z, 14, () => ctx.rng.next());
       if (!cur) break;
       this.hit.clear();
-      const L = this.getLine(ctx);
-      let n = 0;
-      let lx = p.x;
-      let lz = p.z;
-      L.pts[n++] = lx; L.pts[n++] = 2; L.pts[n++] = lz;
+      // visuals: a bolt out of the sky onto the first shadow, then crackling chain bolts between targets
+      ctx.fx.stormStrike(cur.x, cur.z);
+      let lx = cur.x;
+      let lz = cur.z;
       for (let i = 0; i < jumps && cur; i++) {
         this.hit.add(cur.id);
         const c: Enemy = cur;
-        if (n <= L.pts.length - 6) {
-          // jagged midpoint, then the strike point
-          L.pts[n++] = (lx + c.x) / 2 + (Math.random() - 0.5) * 0.8;
-          L.pts[n++] = 1.4 + Math.random() * 0.5;
-          L.pts[n++] = (lz + c.z) / 2 + (Math.random() - 0.5) * 0.8;
-          L.pts[n++] = c.x; L.pts[n++] = 0.9; L.pts[n++] = c.z;
-          lx = c.x;
-          lz = c.z;
-        }
+        if (i > 0) ctx.fx.lightning(lx, 0.9, lz, c.x, 0.9, c.z, 0xb8e4ff, 0.36, 0.28);
+        lx = c.x;
+        lz = c.z;
         ctx.enemies.damage(c, dmg, ctx, { knockback: 1, fromX: p.x, fromZ: p.z, source: this.def.id, color: 'ft-blue' });
         c.slowTimer = Math.max(c.slowTimer, 0.8);
-        ctx.fx.burst(c.x, 0.9, c.z, 0xc0e8ff, 6, 5, 0.25, 0.3);
+        ctx.fx.stunSpark(c.x, c.z);
         cur = ctx.enemies.nearest(c.x, c.z, 6 * s.area, this.hit);
       }
-      const g = L.line.geometry as THREE.BufferGeometry;
-      (g.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-      g.setDrawRange(0, n / 3);
-      L.life = 0.2;
-      L.line.visible = true;
     }
     ctx.events.emit('weapon:fired', { weaponId: 'spark_chain' });
-  }
-  private getLine(ctx: GameContext) {
-    let L = this.lines.find((l) => l.life <= 0);
-    if (!L) {
-      const pts = new Float32Array(3 * 2 * 40);
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(pts, 3).setUsage(THREE.DynamicDrawUsage));
-      const line = new THREE.Line(g, this.mat);
-      line.frustumCulled = false;
-      ctx.scene.add(line);
-      L = { line, life: 0, pts };
-      this.lines.push(L);
-    }
-    return L;
-  }
-  update(dt: number, ctx: GameContext): void {
-    super.update(dt, ctx);
-    for (const l of this.lines) {
-      if (l.life <= 0) continue;
-      l.life -= dt;
-      if (l.life <= 0) l.line.visible = false;
-    }
-  }
-  dispose(ctx: GameContext): void {
-    for (const l of this.lines) {
-      ctx.scene.remove(l.line);
-      l.line.geometry.dispose();
-    }
-    this.lines.length = 0;
   }
 }
 
@@ -247,10 +213,11 @@ class BeaconRay extends TimedWeapon {
       const sp = 26 * s.projectileSpeed;
       ctx.projectiles.spawn({
         x: p.x, z: p.z, y: 1.1, vx: Math.cos(a) * sp, vz: Math.sin(a) * sp,
-        damage: 62 * s.might, pierce: -1, life: 0.7 * s.duration, radius: 0.7 * s.area, scale: 2.1 * Math.sqrt(s.area),
-        color: 0xffffff, source: this.def.id, knockback: 8, trail: 1,
+        damage: 62 * s.might, pierce: -1, life: 0.7 * s.duration, radius: 0.7 * s.area, scale: 1.6 * Math.sqrt(s.area),
+        color: 0xfff0c8, source: this.def.id, knockback: 8, trail: 1,
       });
     }
+    ctx.fx.beaconFlare(p.x, p.z, a0, n);
     ctx.events.emit('weapon:fired', { weaponId: 'wick_lance' });
   }
 }
@@ -258,7 +225,6 @@ class BeaconRay extends TimedWeapon {
 // ---------------------------------------------------------------- Pyre Garden
 class PyreGarden extends TimedWeapon {
   private zones: { x: number; z: number; r: number; life: number; dps: number }[] = [];
-  private pool: MeshPool;
   private warmTick = 0;
   private cur!: { dps: number };
   private readonly onBurn = (e: Enemy) => {
@@ -266,9 +232,8 @@ class PyreGarden extends TimedWeapon {
     e.burnDps = Math.max(e.burnDps, this.cur.dps);
     e.burnSource = this.def.id;
   };
-  constructor(def: WeaponDef, ctx: GameContext) {
+  constructor(def: WeaponDef, _ctx: GameContext) {
     super(def);
-    this.pool = new MeshPool(ctx.scene, new THREE.CircleGeometry(1, 40).rotateX(-Math.PI / 2), glowMaterial(0xff7a2a, 1.8, 0.5));
   }
   baseCooldown() {
     return 1.9;
@@ -281,7 +246,7 @@ class PyreGarden extends TimedWeapon {
       const x = i === 0 ? ctx.player.x : t ? t.x : ctx.player.x + ctx.rng.range(-6, 6);
       const z = i === 0 ? ctx.player.z : t ? t.z : ctx.player.z + ctx.rng.range(-6, 6);
       this.zones.push({ x, z, r: 3 * s.area, life: 4.5 * s.duration, dps: 42 * s.might });
-      ctx.fx.burst(x, 0.3, z, 0xff8a2a, 18, 6, 0.5, 0.45);
+      ctx.fx.pyreBloom(x, z, 3 * s.area, 4.5 * s.duration);
     }
   }
   update(dt: number, ctx: GameContext): void {
@@ -289,7 +254,6 @@ class PyreGarden extends TimedWeapon {
     const p = ctx.player;
     let warm = false;
     this.warmTick -= dt;
-    this.pool.begin();
     for (let i = this.zones.length - 1; i >= 0; i--) {
       const zn = this.zones[i];
       zn.life -= dt;
@@ -298,22 +262,17 @@ class PyreGarden extends TimedWeapon {
         continue;
       }
       this.cur = zn;
-      if (Math.random() < 0.7) ctx.fx.spark(zn.x + (Math.random() - 0.5) * zn.r * 1.6, 0.2, zn.z + (Math.random() - 0.5) * zn.r * 1.6, 0, 2.5 + Math.random() * 2, 0, 0xffa040, 0.55, 0.4);
       ctx.enemies.forEachInRadius(zn.x, zn.z, zn.r, this.onBurn);
       if ((p.x - zn.x) ** 2 + (p.z - zn.z) ** 2 < zn.r * zn.r) warm = true;
-      const m = this.pool.next();
-      m.position.set(zn.x, 0.07, zn.z);
-      m.scale.setScalar(zn.r * (0.95 + Math.sin(zn.life * 9) * 0.05) * Math.min(1, zn.life * 3));
     }
-    this.pool.end();
     // standing in your own garden warms the lantern
     if (warm && this.warmTick <= 0) {
       this.warmTick = 0.5;
       p.heal(0.6, ctx);
+      ctx.fx.warmth(p.x, p.z);
     }
   }
   dispose(): void {
-    this.pool.dispose();
     this.zones.length = 0;
   }
 }
@@ -327,9 +286,8 @@ class GlacierHeart extends TimedWeapon {
       const x = e.x;
       const z = e.z;
       const r = 1.6 * Math.sqrt(s.area);
-      ctx.fx.burst(x, 0.8, z, 0xd0f4ff, 14, 6, 0.4, 0.35);
-      ctx.fx.ring(x, z, 0xa0e8ff, 0.2, r, 0.25);
-      ctx.enemies.forEachInRadius(x, z, r, (o) => ctx.enemies.damage(o, 30 * s.might, ctx, { knockback: 4, fromX: x, fromZ: z, source: this.def.id, color: 'ft-blue', canCrit: false }));
+      ctx.fx.shatter(x, z, r);
+      ctx.enemies.forEachInRadius(x, z, r, (o) => ctx.enemies.damage(o, 22 * s.might /* S2: 30 → 22 */, ctx, { knockback: 4, fromX: x, fromZ: z, source: this.def.id, color: 'ft-blue', canCrit: false }));
     }
     e.slowTimer = Math.max(e.slowTimer, 2.5 * s.duration);
   };
@@ -350,6 +308,7 @@ class GlacierHeart extends TimedWeapon {
         color: 0xb8f0ff, source: this.def.id, knockback: 1.5, trail: 0.6, onHit: this.shatter,
       });
     }
+    ctx.fx.glacierNova(p.x, p.z);
     ctx.events.emit('weapon:fired', { weaponId: 'frost_shards' });
   }
 }

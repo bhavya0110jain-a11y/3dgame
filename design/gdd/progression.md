@@ -8,8 +8,11 @@
 Lv 20 ≈ 7–8 min; Lv 40+ at 15:00 with a strong build.
 
 ## Ash
-`ash = (pickups + kills/20 + 5·minutes + 150·difficulty·victory + 12·endlessMinutes) × greed`.
-Sim: fresh-save run ≈ 100–250 Ash (dies 5–9 min); half-Hearth ≈ 600–800; full-Hearth victory ≈ 1.4k.
+`ash = (pickups + kills/40 + 5·minutes + 150·difficulty·victory + 12·endlessMinutes) × greed`
+(`ashForRun` in `src/game/RunState.ts`, shared by Game and the balance sim). Sprint 2 halved the kill share
+(1/20 → 1/40) because adaptive pressure raised late kill counts ~1.8×.
+Sim (Sprint 2): fresh-save run ≈ 150–700 Ash (dies 6–16 min, median ≈ 9–12); half-Hearth ≈ 700–900; full-Hearth
+victory ≈ 1.3–1.6k. Half-Hearth (≈ 2.2k Ash of ranks) is reached after ~4–5 runs and wins ~40 % of the time in the sim.
 Achievements add ≈ 2.5k Ash over a career.
 
 ## Hearth (13 upgrades, 18,970 Ash) + bearers (3,550 Ash)

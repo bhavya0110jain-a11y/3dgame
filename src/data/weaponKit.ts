@@ -93,7 +93,8 @@ export function densestTarget(ctx: GameContext, x: number, z: number, range: num
 
 /** Shows an area telegraph using fx.telegraph when the VFX agent provides it, rings otherwise. */
 export function telegraph(ctx: GameContext, x: number, z: number, r: number, dur: number, color: number): void {
-  const fx = ctx.fx as unknown as { telegraph?: (x: number, z: number, r: number, dur: number, color: number) => void };
-  if (typeof fx.telegraph === 'function') fx.telegraph(x, z, r, dur, color);
+  const fx = ctx.fx as unknown as { markZone?: (x: number, z: number, r: number, dur: number, color: number) => void };
+  // player weapons use a light target mark, never the enemy danger telegraph (which means "get out of here")
+  if (typeof fx.markZone === 'function') fx.markZone(x, z, r, dur, color);
   else ctx.fx.ring(x, z, color, r * 0.15, r, dur);
 }

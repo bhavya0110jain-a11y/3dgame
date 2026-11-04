@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { BiomeDef, BiomeProp, PropKind } from '../data/biomes';
 import { getModel } from '../render/Assets';
+import { renderView } from '../render/Quality';
 import type { GroundMask } from './GroundMask';
 import { patchWorldMaterial } from './WorldShading';
 
@@ -10,6 +11,31 @@ export const VIEW_CHUNKS = 2; // radius in chunks around the player
 const GRID = 4; // collider grid cell (m)
 const SPAWN_CLEAR_SOLID = 10.5; // menu glade / run start stays open
 const SPAWN_CLEAR_DECOR = 2.5;
+/** Lantern cube-shadow proxies: props within this distance of the bearer (m; ~ the lantern light distance at full
+ *  light), at most PROXY_CAP per kind. */
+const PROXY_R = 17;
+const PROXY_CAP = 20;
+/** Moon-shadow proxies: props within this distance of the bearer. The moon frustum is ±22 m (x zoom ≤ 1.3) around
+ *  the camera focus (≤ ~6 m from the bearer); 38 m covers its corners at full zoom-out. */
+const MOON_R = 38;
+/** View culling: re-cull when the camera footprint moves/grows by this much (m); props this far outside it stay. */
+const VIEW_SLACK = 4;
+const VIEW_MARGIN = 4;
+/** Low-branching crowns stay out of the lantern's shadow: a pine next to the bearer would otherwise black out half
+ *  the light pool (light-is-life must read at a glance). They still cast moon shadows. */
+const CANOPY: ReadonlySet<PropKind> = new Set<PropKind>(['pine', 'oak']);
+/** Kinds that still cast moon shadows on the medium tier (tall silhouettes; small clutter skips the pass). */
+const TALL: ReadonlySet<PropKind> = new Set<PropKind>(['pine', 'oak', 'deadtree', 'pillar', 'ruin_wall', 'lantern_post', 'crystal']);
+
+/** World-side quality knobs (World.setQuality maps the renderer tier onto these). */
+export interface PropQuality {
+  /** 0..1 multiplier on decor placement attempts (solid props are never thinned: colliders are gameplay). */
+  decor: number;
+  /** Which props cast moon shadows. */
+  shadows: 'all' | 'tall' | 'none';
+  /** Maintain near-prop proxies for the lantern's cube shadow. */
+  lantern: boolean;
+}
 
 export interface Collider {
   x: number;
@@ -106,7 +132,16 @@ interface PropSlot {
   def: BiomeProp;
   info: KindInfo;
   body: THREE.InstancedMesh;
+  /** Near-player copies cast into the lantern cube shadow only (see Lighting's shadow gate). */
+  proxy: THREE.InstancedMesh | null;
+  /** Copies within the moon-shadow frustum's reach: the only moon casters (the full chunk set never casts). */
+  moonProxy: THREE.InstancedMesh | null;
   glow: THREE.InstancedMesh | null;
+  /** Placed instances (all streamed chunks): matrices, body colours, glow colours. The GPU meshes draw only the
+   *  in-view subset (Props.cullView); the shadow proxies gather from here too. */
+  srcM: Float32Array;
+  srcC: Float32Array;
+  srcG: Float32Array;
   count: number;
   tint: THREE.Color;
   glowColor: THREE.Color;
@@ -136,6 +171,17 @@ const poolFragment = /* glsl */ `
   }
 `;
 
+/** Lantern proxies are never drawn by the main camera (or AO/normal passes): skip the draw, keep the shadow. */
+let proxySaved = 0;
+function proxySkip(this: THREE.Object3D, _r: unknown, _s: unknown, _c: unknown, geometry: THREE.BufferGeometry): void {
+  proxySaved = geometry.drawRange.count;
+  geometry.drawRange.count = -1;
+}
+function proxyRestore(this: THREE.Object3D, _r: unknown, _s: unknown, _c: unknown, geometry: THREE.BufferGeometry): void {
+  geometry.drawRange.count = proxySaved;
+}
+const PROXY_MAT = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+
 /** Instanced, chunk-streamed environment props + their collision circles. */
 export class Props {
   readonly group = new THREE.Group();
@@ -154,6 +200,10 @@ export class Props {
   private p = new THREE.Vector3();
   private c = new THREE.Color();
   private up = new THREE.Vector3(0, 1, 0);
+  private quality: PropQuality = { decor: 1, shadows: 'all', lantern: true };
+  private proxyAt = { x: 1e9, z: 1e9 };
+  private moonAt = { x: 1e9, z: 1e9 };
+  private viewAt = { all: false, cx: 1e9, cz: 1e9, w: 0, h: 0 };
 
   constructor(private mask: GroundMask) {
     this.poolMat = new THREE.ShaderMaterial({
@@ -182,6 +232,11 @@ export class Props {
         (mesh.material as THREE.Material).dispose();
         mesh.dispose();
       }
+      for (const px of [s.proxy, s.moonProxy]) {
+        if (!px) continue;
+        this.group.remove(px);
+        px.dispose();
+      }
     }
     this.slots = [];
     this.totalWeight = biome.props.reduce((a, p) => a + p.weight, 0) || 1;
@@ -193,10 +248,9 @@ export class Props {
       const bodyGeo = model?.body ?? (model?.glow ? null : fallbackGeometry(def.kind, def.color));
       const bodyMat = patchWorldMaterial(
         new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 }),
-        { wind: info.wind ?? 0, windStart: info.windStart, dither: info.dither },
+        { wind: info.wind ?? 0, windStart: info.windStart, dither: info.dither, rim: TALL.has(def.kind) ? 0.85 : 0.45, gloom: 0.72 },
       );
       const body = new THREE.InstancedMesh(bodyGeo ?? new THREE.BufferGeometry(), bodyMat, cap);
-      body.castShadow = !!info.shadow;
       body.receiveShadow = true;
       let glow: THREE.InstancedMesh | null = null;
       if (model?.glow) {
@@ -216,20 +270,170 @@ export class Props {
         mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
         this.group.add(mesh);
       }
+      body.castShadow = false;
+      let proxy: THREE.InstancedMesh | null = null;
+      let moonProxy: THREE.InstancedMesh | null = null;
+      if (info.shadow && bodyGeo) {
+        moonProxy = this.makeProxy(bodyGeo, cap, false);
+        if (info.solid && !CANOPY.has(def.kind)) proxy = this.makeProxy(bodyGeo, PROXY_CAP, true);
+      }
       this.slots.push({
         def,
         info,
         body,
+        proxy,
+        moonProxy,
         glow,
+        srcM: new Float32Array(cap * 16),
+        srcC: new Float32Array(cap * 3),
+        srcG: new Float32Array(cap * 3),
         count: 0,
         tint: new THREE.Color(def.tint ?? 0xffffff),
         glowColor: new THREE.Color(def.glow ?? 0xffffff),
       });
     }
+    this.applyShadows();
+  }
+
+  private makeProxy(geo: THREE.BufferGeometry, cap: number, lantern: boolean): THREE.InstancedMesh {
+    const m = new THREE.InstancedMesh(geo, PROXY_MAT, cap);
+    m.count = 0;
+    m.frustumCulled = false;
+    m.castShadow = true;
+    m.userData.lanternCaster = lantern;
+    m.onBeforeRender = proxySkip as unknown as THREE.Object3D['onBeforeRender'];
+    m.onAfterRender = proxyRestore as unknown as THREE.Object3D['onAfterRender'];
+    this.group.add(m);
+    return m;
+  }
+
+  /** Applies tier knobs. Returns true when placement changed (caller must rebuild the chunks). */
+  setQuality(q: PropQuality): boolean {
+    const replace = q.decor !== this.quality.decor;
+    this.quality = q;
+    this.applyShadows();
+    return replace;
+  }
+
+  private applyShadows(): void {
+    const mode = this.quality.shadows;
+    for (const s of this.slots) {
+      if (s.moonProxy) {
+        s.moonProxy.visible = mode === 'all' || (mode === 'tall' && TALL.has(s.def.kind));
+        s.moonProxy.count = 0;
+      }
+      if (s.proxy) {
+        s.proxy.visible = this.quality.lantern;
+        s.proxy.count = 0;
+      }
+    }
+    this.proxyAt.x = 1e9;
+    this.moonAt.x = 1e9;
+  }
+
+  /**
+   * Re-gathers the shadow proxies around the bearer: lantern proxies (≤ PROXY_R, every ~1.5 m of travel) and moon
+   * proxies (≤ MOON_R, every ~3 m). Cost: one pass over the placed casters' matrices (a few hundred floats x16),
+   * a handful of times per second at most; zero work while standing still.
+   */
+  updateView(px: number, pz: number): void {
+    this.cullView();
+    let dx = px - this.moonAt.x;
+    let dz = pz - this.moonAt.z;
+    if (dx * dx + dz * dz > 9) {
+      this.moonAt.x = px;
+      this.moonAt.z = pz;
+      for (const s of this.slots) if (s.moonProxy?.visible) this.gather(s, s.moonProxy, px, pz, MOON_R);
+    }
+    if (!this.quality.lantern) return;
+    dx = px - this.proxyAt.x;
+    dz = pz - this.proxyAt.z;
+    if (dx * dx + dz * dz < 2.25) return;
+    this.proxyAt.x = px;
+    this.proxyAt.z = pz;
+    for (const s of this.slots) if (s.proxy) this.gather(s, s.proxy, px, pz, PROXY_R);
   }
 
   setTime(t: number): void {
     this.poolMat.uniforms.uTime.value = t;
+  }
+
+  /**
+   * View culling for the main pass: the streamed chunks span 120 x 120 m but the gameplay camera sees roughly a
+   * 90 x 45 m trapezoid, and the instanced props are not frustum-culled per instance. Each slot's GPU buffers are
+   * refilled with the instances inside the camera's ground footprint (renderView, written by CameraRig) plus a
+   * margin, whenever that footprint drifts by more than VIEW_SLACK. Menu / no footprint → everything.
+   */
+  private cullView(): void {
+    const v = renderView;
+    const all = !v.valid;
+    const cx = all ? 0 : (v.minX + v.maxX) * 0.5;
+    const cz = all ? 0 : (v.minZ + v.maxZ) * 0.5;
+    const w = all ? -1 : v.maxX - v.minX;
+    const h = all ? -1 : v.maxZ - v.minZ;
+    const a = this.viewAt;
+    if (all === a.all && Math.abs(cx - a.cx) < VIEW_SLACK && Math.abs(cz - a.cz) < VIEW_SLACK && Math.abs(w - a.w) < VIEW_SLACK && Math.abs(h - a.h) < VIEW_SLACK) return;
+    a.all = all;
+    a.cx = cx;
+    a.cz = cz;
+    a.w = w;
+    a.h = h;
+    const m = VIEW_SLACK + VIEW_MARGIN;
+    const x0 = v.minX - m;
+    const x1 = v.maxX + m;
+    const z0 = v.minZ - m;
+    const z1 = v.maxZ + m;
+    for (const s of this.slots) {
+      const bm = s.body.instanceMatrix.array as Float32Array;
+      const bc = s.body.instanceColor!.array as Float32Array;
+      const gm = s.glow ? (s.glow.instanceMatrix.array as Float32Array) : null;
+      const gc = s.glow ? (s.glow.instanceColor!.array as Float32Array) : null;
+      let n = 0;
+      for (let i = 0; i < s.count; i++) {
+        const o = i * 16;
+        if (!all) {
+          const x = s.srcM[o + 12];
+          const z = s.srcM[o + 14];
+          if (x < x0 || x > x1 || z < z0 || z > z1) continue;
+        }
+        const d = n * 16;
+        for (let k = 0; k < 16; k++) bm[d + k] = s.srcM[o + k];
+        bc[n * 3] = s.srcC[i * 3];
+        bc[n * 3 + 1] = s.srcC[i * 3 + 1];
+        bc[n * 3 + 2] = s.srcC[i * 3 + 2];
+        if (gm && gc) {
+          for (let k = 0; k < 16; k++) gm[d + k] = s.srcM[o + k];
+          gc[n * 3] = s.srcG[i * 3];
+          gc[n * 3 + 1] = s.srcG[i * 3 + 1];
+          gc[n * 3 + 2] = s.srcG[i * 3 + 2];
+        }
+        n++;
+      }
+      for (const mesh of [s.body, s.glow]) {
+        if (!mesh) continue;
+        mesh.count = n;
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.instanceColor!.needsUpdate = true;
+      }
+    }
+  }
+
+  private gather(s: PropSlot, proxy: THREE.InstancedMesh, px: number, pz: number, r: number): void {
+    const src = s.srcM;
+    const dst = proxy.instanceMatrix.array as Float32Array;
+    const cap = proxy.instanceMatrix.count;
+    const r2 = r * r;
+    let n = 0;
+    for (let i = 0; i < s.count && n < cap; i++) {
+      const o = i * 16;
+      const ex = src[o + 12] - px;
+      const ez = src[o + 14] - pz;
+      if (ex * ex + ez * ez > r2) continue;
+      for (let k = 0; k < 16; k++) dst[n * 16 + k] = src[o + k];
+      n++;
+    }
+    proxy.count = n;
+    proxy.instanceMatrix.needsUpdate = true;
   }
 
   rebuild(cx: number, cz: number, seed: number, waterLevel: number, density: number): void {
@@ -241,12 +445,16 @@ export class Props {
       this.gridFree.push(arr);
     }
     this.grid.clear();
+    this.proxyAt.x = 1e9;
+    this.moonAt.x = 1e9;
     if (!this.slots.length) return;
+    const solidN = density;
+    const decorN = Math.round(density * this.quality.decor);
     for (let dx = -VIEW_CHUNKS; dx <= VIEW_CHUNKS; dx++) {
       for (let dz = -VIEW_CHUNKS; dz <= VIEW_CHUNKS; dz++) {
         const kx = cx + dx;
         const kz = cz + dz;
-        for (let i = 0; i < density; i++) {
+        for (let i = 0; i < solidN; i++) {
           const b = seed + i * 13;
           const x = (kx + hash2(kx, kz, b)) * CHUNK;
           const z = (kz + hash2(kx, kz, b + 1)) * CHUNK;
@@ -257,6 +465,8 @@ export class Props {
             if (w <= 0) break;
           }
           const slot = this.slots[idx];
+          // thinning decor keeps every solid prop (and so every collider) identical across tiers
+          if (i >= decorN && !slot.info.solid) continue;
           const r4 = hash2(kx, kz, b + 3);
           const r5 = hash2(kx, kz, b + 4);
           if (!this.place(slot, x, z, r4, r5, waterLevel)) continue;
@@ -269,16 +479,7 @@ export class Props {
         }
       }
     }
-    for (const s of this.slots) {
-      s.body.count = s.count;
-      s.body.instanceMatrix.needsUpdate = true;
-      if (s.body.instanceColor) s.body.instanceColor.needsUpdate = true;
-      if (s.glow) {
-        s.glow.count = s.count;
-        s.glow.instanceMatrix.needsUpdate = true;
-        if (s.glow.instanceColor) s.glow.instanceColor.needsUpdate = true;
-      }
-    }
+    this.viewAt.cx = 1e9; // re-cull on the next updateView
     this.pools.count = this.poolCount;
     this.pools.instanceMatrix.needsUpdate = true;
     if (this.pools.instanceColor) this.pools.instanceColor.needsUpdate = true;
@@ -305,7 +506,7 @@ export class Props {
   }
 
   private place(slot: PropSlot, x: number, z: number, r4: number, r5: number, waterLevel: number): boolean {
-    if (slot.count >= slot.body.instanceMatrix.count) return false;
+    if (slot.count * 16 >= slot.srcM.length) return false;
     const { def, info } = slot;
     if (!this.accepts(def, info, x, z, waterLevel)) return false;
     const [smin, smax] = def.scale ?? [0.8, 1.25];
@@ -322,16 +523,15 @@ export class Props {
     this.s.set(sc, sc * (0.9 + r5 * 0.2), sc);
     this.m.compose(this.p, this.q, this.s);
     const i = slot.count++;
-    slot.body.setMatrixAt(i, this.m);
+    this.m.toArray(slot.srcM, i * 16);
     const v = 0.88 + r4 * 0.24;
     this.c.copy(slot.tint).multiplyScalar(v);
     this.c.r *= 0.96 + r5 * 0.08;
     this.c.b *= 1.04 - r5 * 0.08;
-    slot.body.setColorAt(i, this.c);
+    this.c.toArray(slot.srcC, i * 3);
     if (slot.glow) {
-      slot.glow.setMatrixAt(i, this.m);
       this.c.copy(slot.glowColor).multiplyScalar(0.85 + r5 * 0.3);
-      slot.glow.setColorAt(i, this.c);
+      this.c.toArray(slot.srcG, i * 3);
     }
     const cos = Math.cos(yaw);
     const sin = Math.sin(yaw);

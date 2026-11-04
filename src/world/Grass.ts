@@ -11,10 +11,12 @@ import { patchWorldMaterial } from './WorldShading';
 const GRASS_S = 56;
 const BLADES = 36000;
 const FLOWERS = 1400;
+const WHITE = new THREE.Color(1, 1, 1);
 
 const FIELD_PARS = /* glsl */ `
   attribute vec4 aBlade;
   uniform float uGrassH;
+  uniform float uBladeW;
   uniform float uDensity;
   uniform float uGMode;
   uniform float uWaterLevel;
@@ -70,7 +72,7 @@ function fieldVertex(flower: boolean): string {
        vHead = position.z;
        vGrassCol = position.z > 0.5 ? fc : vec3(1.0);
        vGrassT = bt;`
-    : `float width = 0.11 * (0.7 + 0.6 * r1) * step(0.001, h);
+    : `float width = 0.11 * uBladeW * (0.7 + 0.6 * r1) * step(0.001, h);
        vec3 gpos = vec3(root.x + side.x * position.x * width, t * h * (1.0 - push * 0.3), root.y + side.y * position.x * width);
        gpos.xz += bend * bendAmt;
        vGrassCol = vec3(0.8 + 0.4 * fract(r1 * 13.7)) * (0.85 + 0.3 * clump);
@@ -125,9 +127,19 @@ function seedAttribute(g: THREE.InstancedBufferGeometry, count: number, seed: nu
   // jittered grid → even coverage without clumps
   const n = Math.ceil(Math.sqrt(count));
   const cell = GRASS_S / n;
+  // cells in a shuffled order, so any prefix (lower quality tiers draw fewer instances) still covers the patch
+  const order = new Uint32Array(count);
+  for (let i = 0; i < count; i++) order[i] = i;
+  for (let i = count - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    const t = order[i];
+    order[i] = order[j];
+    order[j] = t;
+  }
   for (let i = 0; i < count; i++) {
-    const gx = i % n;
-    const gz = Math.floor(i / n);
+    const c = order[i];
+    const gx = c % n;
+    const gz = Math.floor(c / n);
     a[i * 4] = (gx + rnd()) * cell;
     a[i * 4 + 1] = (gz + rnd()) * cell;
     a[i * 4 + 2] = rnd();
@@ -141,6 +153,7 @@ export class Grass {
   readonly group = new THREE.Group();
   private uniforms = {
     uGrassH: { value: 0.55 },
+    uBladeW: { value: 1 },
     uDensity: { value: 1 },
     uGMode: { value: 0 },
     uWaterLevel: { value: 1 },
@@ -152,12 +165,17 @@ export class Grass {
     uFlowerC: { value: new THREE.Color() },
   };
   private flowerUniforms = { ...this.uniforms, uGrassH: { value: 0.4 }, uDensity: { value: 1 } };
+  private blades: THREE.Mesh;
+  private tmpColor = new THREE.Color();
+  private flowers: THREE.Mesh;
 
   constructor() {
     const blades = new THREE.Mesh(bladeGeometry(), this.makeMaterial(false));
     seedAttribute(blades.geometry as THREE.InstancedBufferGeometry, BLADES, 1234);
     const flowers = new THREE.Mesh(flowerGeometry(), this.makeMaterial(true));
     seedAttribute(flowers.geometry as THREE.InstancedBufferGeometry, FLOWERS, 98765);
+    this.blades = blades;
+    this.flowers = flowers;
     for (const m of [blades, flowers]) {
       m.frustumCulled = false;
       m.receiveShadow = true;
@@ -193,6 +211,17 @@ export class Grass {
     return patchWorldMaterial(mat, { gloom: flower ? 0.45 : 1 });
   }
 
+  /**
+   * Quality scaling: draw only the first `frac` of the (shuffled) blade / flower budget. Blades get wider by
+   * 1/sqrt(frac) (capped) so the meadow keeps its coverage and silhouette with fewer triangles.
+   */
+  setQuality(frac: number): void {
+    const f = Math.min(1, Math.max(0.2, frac));
+    (this.blades.geometry as THREE.InstancedBufferGeometry).instanceCount = Math.round(BLADES * f);
+    (this.flowers.geometry as THREE.InstancedBufferGeometry).instanceCount = Math.round(FLOWERS * Math.sqrt(f));
+    this.uniforms.uBladeW.value = Math.min(1.6, 1 / Math.sqrt(f));
+  }
+
   setBiome(b: BiomeDef): void {
     const g = b.grass;
     const u = this.uniforms;
@@ -202,7 +231,9 @@ export class Grass {
     u.uWaterLevel.value = b.ground.waterLevel;
     u.uGrassRoot.value.setHex(g.root);
     u.uGrassTip.value.setHex(g.tip);
-    u.uGrassTip2.value.setHex(g.tip).lerp(new THREE.Color(0xfff0a0), 0.35);
+    // second tip tone: a pale moonlit sheen (keeps tips brighter than the ground); a yellow lerp here read as lime
+    // under the amber lantern. Warmth comes from the lantern alone (light-is-life).
+    u.uGrassTip2.value.setHex(g.tip).lerp(this.tmpColor.setHex(b.sky.moonGlow).lerp(WHITE, 0.6), 0.38);
     u.uFlowerA.value.setHex(g.flowers[0] ?? 0xffffff);
     u.uFlowerB.value.setHex(g.flowers[1] ?? g.flowers[0] ?? 0xffffff);
     u.uFlowerC.value.setHex(g.flowers[2] ?? g.flowers[0] ?? 0xffffff);

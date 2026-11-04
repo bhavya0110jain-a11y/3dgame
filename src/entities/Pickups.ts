@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { GameContext } from '../game/types';
 import { Billboards } from '../render/vfx/Billboards';
 import { Frame } from '../render/vfx/atlas';
-import { PF_FLICKER } from '../render/vfx/Particles';
+import { PF_BOUNCE, PF_FLICKER } from '../render/vfx/Particles';
 import { ashGeometry, beaconGeometry, chestGeometry, emberGeometry, oilGeometry } from '../render/vfx/pickupModels';
 import { applyRim } from '../render/materials';
 
@@ -47,6 +47,9 @@ export class PickupManager {
   /** Halos, glints, ground sigils and light shafts for every pickup — one instanced draw call. */
   private glows: Billboards;
   private streakBudget = 0;
+  /** player position (for the far-pickup guide motes) */
+  private px = 0;
+  private pz = 0;
 
   constructor(scene: THREE.Scene) {
     // ember: cut gem, unlit with baked facets; tinted + boosted per instance so it blooms
@@ -103,6 +106,8 @@ export class PickupManager {
 
   update(dt: number, ctx: GameContext, time: number): void {
     const pl = ctx.player;
+    this.px = pl.x;
+    this.pz = pl.z;
     const magnet = ctx.run.stats.magnet;
     this.streakBudget = 60;
     for (const p of this.list) {
@@ -170,7 +175,16 @@ export class PickupManager {
       case 'ash': {
         if (ps.pressure > 0.85) break;
         const c = p.kind === 'ash' ? 0xc8b0ff : emberColor(p.value);
-        ps.emit(p.x, 0.7, p.z, 0, 1.8, 0, 0.2, 0.45, 1.3, 0xffffff, c, 2.6, Frame.SPARKLE, 1, 0, 0, 0, 0, ps.rand() * 6);
+        const big = p.value >= 10;
+        // pop: a sparkle that jumps up into the lantern + two motes drifting up
+        ps.emit(p.x, 0.7, p.z, 0, 1.8, 0, 0.2, big ? 0.8 : 0.45, big ? 2.2 : 1.3, 0xffffff, c, 2.6, Frame.SPARKLE, 1, 0, 0, 0, 0, ps.rand() * 6);
+        if (ps.pressure < 0.6) {
+          for (let i = 0; i < 2; i++) ps.emit(p.x, 0.6, p.z, (ps.rand() - 0.5) * 1.5, 2.5 + ps.rand() * 2, (ps.rand() - 0.5) * 1.5, 0.35, 0.18, 0.04, 0xffffff, c, 2.8, Frame.DOT, 1, -3, 1);
+        }
+        if (big) {
+          fx.ring(p.x, p.z, c, 0.2, 1.6, 0.3);
+          ps.emit(p.x, 0.8, p.z, 0, 0, 0, 0.18, 0.6, 2, 0xffffff, c, 2.2, Frame.STAR, 1, 0, 0, 0, 0, ps.rand());
+        }
         break;
       }
       case 'oil':
@@ -184,11 +198,40 @@ export class PickupManager {
         fx.column(p.x, 0, p.z, 2.6, 15, 0xffd27a, 3, 1.1);
         fx.flash(p.x, 1, p.z, 0xffd27a, 4, 3.5, true);
         fx.ring(p.x, p.z, 0xffd27a, 0.5, 5, 0.6);
+        // a fountain of golden glints thrown out of the opened lid
+        for (let i = 0; i < 28; i++) {
+          const a = ps.rand() * Math.PI * 2;
+          const sp = 1.5 + ps.rand() * 3;
+          ps.emit(p.x, 0.9, p.z, Math.cos(a) * sp, 5 + ps.rand() * 5, Math.sin(a) * sp, 0.9 + ps.rand() * 0.5, 0.3, 0.1, 0xfff6d0, 0xffb030, 3, i % 3 === 0 ? Frame.STAR : Frame.DOT, 1, -12, 0.4, 0.02, PF_BOUNCE | PF_FLICKER, ps.rand() * 6, (ps.rand() - 0.5) * 6);
+        }
         break;
       case 'beacon':
         fx.column(p.x, 0, p.z, 2.2, 18, 0x9ad8ff, 3, 1.1);
         fx.flash(p.x, 1, p.z, 0x9ad8ff, 4, 3.5, true);
+        for (let i = 0; i < 20; i++) {
+          const a = (i / 20) * Math.PI * 2;
+          ps.emit(p.x, 0.6, p.z, Math.cos(a) * 9, 0.5, Math.sin(a) * 9, 0.5, 0.4, 0.1, 0xffffff, 0x9ad8ff, 2.8, Frame.STREAK, 1, 0, 2, 0.06);
+        }
         break;
+    }
+  }
+
+  /**
+   * Far-away reliquary / beacon (likely off-screen): three ground motes run out from the bearer's feet toward it,
+   * like light leaking through a door — a diegetic pointer that needs no HUD arrow.
+   */
+  private guide(p: Pickup, color: number): void {
+    const dx = p.x - this.px, dz = p.z - this.pz;
+    const d = Math.hypot(dx, dz);
+    if (d < 11) return;
+    const ux = dx / d, uz = dz / d;
+    const fade = Math.min(1, (d - 11) / 4);
+    for (let k = 0; k < 3; k++) {
+      const t = (p.phase * 0.9 + k / 3) % 1;
+      const r = 1.6 + t * 2.4;
+      const a = Math.sin(t * Math.PI) * fade;
+      this.glows.ground(this.px + ux * r, 0.08, this.pz + uz * r, 1.3 - 0.4 * t, Frame.GLOW, color, 2, a);
+      this.glows.ground(this.px + ux * r, 0.09, this.pz + uz * r, 0.7, Frame.SPARKLE, 0xffffff, 1.2, a * 0.8, Math.atan2(uz, ux));
     }
   }
 
@@ -247,6 +290,7 @@ export class PickupManager {
             const a = p.phase * 1.6 + k * 2.094;
             g.add(p.x + Math.cos(a) * 0.85, 0.55 + 0.3 * Math.sin(p.phase * 2 + k), p.z + Math.sin(a) * 0.85, 0.6, Frame.STAR, 0xfff0c0, 2.4, 0.8 + 0.2 * Math.sin(p.phase * 7 + k), p.phase);
           }
+          this.guide(p, 0xffc040);
           break;
         }
         case 'beacon': {
@@ -259,6 +303,7 @@ export class PickupManager {
           g.add(p.x, y, p.z, 2.6, Frame.GLOW, 0x6ac0ff, 1.3 + 0.3 * pulse);
           g.ground(p.x, 0.06, p.z, 3.2, Frame.RING, 0x8ad0ff, 1.8, 0.9, p.phase);
           g.ground(p.x, 0.07, p.z, 2.2, Frame.RING, 0xd0f0ff, 1.4, 0.7, -p.phase * 1.4);
+          this.guide(p, 0x8ad0ff);
           break;
         }
         case 'ash': {

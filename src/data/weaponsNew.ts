@@ -1,8 +1,8 @@
-import * as THREE from 'three';
 import type { GameContext, WeaponDef, WeaponInstance } from '../game/types';
 import type { Enemy } from '../entities/Enemies';
 import type { Projectile } from '../entities/Projectiles';
-import { TimedWeapon, MeshPool, glowMaterial, densestTarget, telegraph } from './weaponKit';
+import { TimedWeapon, densestTarget, telegraph } from './weaponKit';
+import { Frame } from '../render/vfx/atlas';
 
 /*
  * New base weapons (each with an `evolved` variant used by its evolution):
@@ -26,19 +26,19 @@ interface Hook {
   back: boolean;
   spin: number;
   hit: Set<number>;
+  /** ribbon-trail id (visual), -1 = none */
+  trail: number;
 }
 
 export class LanternHook extends TimedWeapon {
   private hooks: Hook[] = [];
-  private pool: MeshPool;
   private cur!: Hook;
+  private vt = 0;
   private pullTimer = 0;
   private readonly onTouch = (e: Enemy) => this.touch(e);
   private ctxRef!: GameContext;
   constructor(def: WeaponDef, ctx: GameContext, private evolved = false) {
     super(def);
-    const geom = new THREE.TorusGeometry(evolved ? 0.5 : 0.36, evolved ? 0.1 : 0.08, 6, 14, Math.PI * 1.35).rotateX(-Math.PI / 2);
-    this.pool = new MeshPool(ctx.scene, geom, glowMaterial(evolved ? 0xc8b0ff : 0xffcf6a, 2.8));
   }
   baseCooldown() {
     return this.evolved ? 1.05 : this.lv([1.9, 1.8, 1.7, 1.6, 1.5, 1.4, 1.3, 1.1]);
@@ -55,7 +55,7 @@ export class LanternHook extends TimedWeapon {
       const a = this.evolved ? a0 + i * fan : a0 + (i - (count - 1) / 2) * fan;
       let h = this.hooks.find((q) => !q.active);
       if (!h) {
-        h = { active: false, x: 0, z: 0, dx: 0, dz: 0, dist: 0, max: 0, speed: 0, dmg: 0, back: false, spin: 0, hit: new Set() };
+        h = { active: false, x: 0, z: 0, dx: 0, dz: 0, dist: 0, max: 0, speed: 0, dmg: 0, back: false, spin: 0, hit: new Set(), trail: -1 };
         this.hooks.push(h);
       }
       h.active = true;
@@ -69,7 +69,10 @@ export class LanternHook extends TimedWeapon {
       h.dmg = dmg;
       h.back = false;
       h.hit.clear();
+      if (h.trail < 0) h.trail = ctx.fx.ribbons.alloc(this.evolved ? 0xb89cff : 0xffb347, (this.evolved ? 0.55 : 0.4) * Math.sqrt(s.area), 1.6);
+      else ctx.fx.ribbons.reset(h.trail);
     }
+    ctx.fx.hookThrow(p.x, p.z, Math.cos(a0), Math.sin(a0), this.evolved);
     ctx.events.emit('weapon:fired', { weaponId: this.def.id });
   }
   private touch(e: Enemy): void {
@@ -81,7 +84,7 @@ export class LanternHook extends TimedWeapon {
     // outbound shoves away; the return trip drags shadows toward you (reaper drags harder)
     if (h.back) ctx.enemies.damage(e, h.dmg, ctx, { knockback: this.evolved ? -9 : -4, fromX: p.x, fromZ: p.z, source: this.def.id });
     else ctx.enemies.damage(e, h.dmg, ctx, { knockback: 5, fromX: h.x - h.dx, fromZ: h.z - h.dz, source: this.def.id });
-    ctx.fx.burst(e.x, 0.9, e.z, this.evolved ? 0xc8b0ff : 0xffcf6a, 4, 3, 0.25, 0.25);
+    ctx.fx.hookSlash(e.x, e.z, h.dx, h.dz, this.evolved);
   }
   update(dt: number, ctx: GameContext): void {
     super.update(dt, ctx);
@@ -92,7 +95,8 @@ export class LanternHook extends TimedWeapon {
     this.pullTimer -= dt;
     const pull = this.evolved && this.pullTimer <= 0;
     if (pull) this.pullTimer = 0.12;
-    this.pool.begin();
+    this.vt += dt;
+    const vs = Math.sqrt(s.area) * (this.evolved ? 1.35 : 1);
     for (const h of this.hooks) {
       if (!h.active) continue;
       if (!h.back) {
@@ -111,6 +115,9 @@ export class LanternHook extends TimedWeapon {
         const step = h.speed * 1.35 * dt;
         if (d < Math.max(0.8, step)) {
           h.active = false;
+          if (h.trail >= 0) ctx.fx.ribbons.release(h.trail);
+          h.trail = -1;
+          ctx.fx.flash(p.x, 1.1, p.z, this.evolved ? 0xc8b0ff : 0xffcf6a, 0.9, 1.6);
           continue;
         }
         h.x += (dx / d) * step;
@@ -124,16 +131,15 @@ export class LanternHook extends TimedWeapon {
       h.spin += dt * 18;
       this.cur = h;
       ctx.enemies.forEachInRadius(h.x, h.z, r, this.onTouch);
-      const m = this.pool.next();
-      m.position.set(h.x, 1.0, h.z);
-      m.rotation.set(0, h.spin, 0);
-      m.scale.setScalar(Math.sqrt(s.area));
-      if (Math.random() < 0.7) ctx.fx.spark(h.x, 1, h.z, 0, 0.4, 0, this.evolved ? 0xb090ff : 0xffb347, 0.35, 0.3);
+      // visuals: spinning sickle of light on a glowing lamp-chain, ribbon trail, shedding sparks
+      ctx.fx.hookHead(h.x, 1.0, h.z, h.spin, vs, this.evolved);
+      ctx.fx.hookTether(p.x, p.z, h.x, h.z, this.vt, this.evolved);
+      if (h.trail >= 0) ctx.fx.ribbons.push(h.trail, h.x, 1.0, h.z);
+      if (Math.random() < 0.5) ctx.fx.spark(h.x, 1, h.z, 0, 0.4, 0, this.evolved ? 0xb090ff : 0xffb347, 0.35, 0.3);
     }
-    this.pool.end();
   }
-  dispose(): void {
-    this.pool.dispose();
+  dispose(ctx: GameContext): void {
+    for (const h of this.hooks) if (h.trail >= 0) ctx.fx.ribbons.release(h.trail);
     this.hooks.length = 0;
   }
 }
@@ -143,6 +149,7 @@ export class MothLantern extends TimedWeapon {
   private readonly onMothHit = (p: Projectile, e: Enemy, ctx: GameContext) => {
     // monarchs: a full-size moth splits into two smaller moths on hit (one generation)
     if (!this.evolved || p.scale < 0.8) return;
+    ctx.fx.mothSplit(e.x, e.z);
     for (let k = 0; k < 2; k++) {
       const a = Math.random() * Math.PI * 2;
       const sp = 9 * ctx.run.stats.projectileSpeed;
@@ -177,6 +184,7 @@ export class MothLantern extends TimedWeapon {
         onHit: this.evolved ? this.onMothHit : undefined,
       });
     }
+    ctx.fx.mothRelease(p.x, p.z, this.evolved ? 0xa0c8ff : 0xfff0c0, this.evolved);
     ctx.events.emit('weapon:fired', { weaponId: this.def.id });
   }
 }
@@ -190,6 +198,10 @@ interface Toll {
   r: number;
   dmg: number;
   after: number; // aftershocks remaining (evolved)
+  /** visual: fall duration of the current toll (for the descending-bell tell) */
+  t0: number;
+  /** visual: current toll is an aftershock */
+  echo: boolean;
 }
 
 export class VesperBell extends TimedWeapon {
@@ -223,7 +235,7 @@ export class VesperBell extends TimedWeapon {
       const z = tgt ? tgt.z : p.z + ctx.rng.range(-4, 4);
       let t = this.tolls.find((q) => !q.active);
       if (!t) {
-        t = { active: false, x: 0, z: 0, t: 0, r: 0, dmg: 0, after: 0 };
+        t = { active: false, x: 0, z: 0, t: 0, r: 0, dmg: 0, after: 0, t0: 1, echo: false };
         this.tolls.push(t);
       }
       t.active = true;
@@ -233,6 +245,8 @@ export class VesperBell extends TimedWeapon {
       t.r = r;
       t.dmg = dmg;
       t.after = this.evolved ? 2 : 0;
+      t.t0 = t.t;
+      t.echo = false;
       telegraph(ctx, x, z, r, t.t, this.evolved ? 0xfff0a0 : 0xffd27a);
     }
   }
@@ -242,17 +256,20 @@ export class VesperBell extends TimedWeapon {
     for (const t of this.tolls) {
       if (!t.active) continue;
       t.t -= dt;
-      if (t.t > 0) continue;
+      if (t.t > 0) {
+        if (!t.echo) ctx.fx.bellFall(t.x, t.z, t.r, 1 - t.t / t.t0, this.evolved);
+        continue;
+      }
       this.cur = t;
-      ctx.fx.ring(t.x, t.z, 0xffe0a0, 0.3, t.r * 1.1, 0.35);
-      ctx.fx.ring(t.x, t.z, 0xffffff, 0.2, t.r * 0.6, 0.2);
-      ctx.fx.burst(t.x, 0.3, t.z, 0xffd27a, 26, 8, 0.45, 0.4);
+      ctx.fx.bellToll(t.x, t.z, t.r, this.evolved, t.echo);
       ctx.enemies.forEachInRadius(t.x, t.z, t.r, this.onHitEnemy);
       ctx.events.emit('weapon:fired', { weaponId: this.def.id });
       ctx.shake(0.06);
       if (t.after > 0) {
         t.after--;
         t.t = 0.28;
+        t.t0 = t.t;
+        t.echo = true;
         t.r *= 1.35;
         t.dmg *= 0.5;
       } else t.active = false;
@@ -267,7 +284,7 @@ export class VesperBell extends TimedWeapon {
 export class GloamBeam implements WeaponInstance {
   level = 1;
   private angle = 0;
-  private pool: MeshPool;
+  private vt = 0;
   private ctxRef!: GameContext;
   private bx = 0;
   private bz = 0;
@@ -293,10 +310,7 @@ export class GloamBeam implements WeaponInstance {
       e.burnSource = this.def.id;
     }
   };
-  constructor(readonly def: WeaponDef, ctx: GameContext, private evolved = false) {
-    const geom = new THREE.BoxGeometry(1, 0.16, 0.5).translate(0.5, 0, 0);
-    this.pool = new MeshPool(ctx.scene, geom, glowMaterial(evolved ? 0xffb0e0 : 0x9ad8ff, 2.2, 0.75));
-  }
+  constructor(readonly def: WeaponDef, _ctx: GameContext, private evolved = false) {}
   update(dt: number, ctx: GameContext): void {
     this.ctxRef = ctx;
     const s = ctx.run.stats;
@@ -309,7 +323,8 @@ export class GloamBeam implements WeaponInstance {
     this.angle += speed * dt;
     this.bx = p.x;
     this.bz = p.z;
-    this.pool.begin();
+    this.vt += dt;
+    if (this.evolved) ctx.fx.groundGlow(p.x, p.z, 3.6, 0xff7ad0, 0.7, Frame.RING, this.vt * 1.5);
     for (let i = 0; i < n; i++) {
       // evolved: alternate beams sweep in opposite directions (eclipse scissor)
       const dir = this.evolved && i % 2 === 1 ? -1 : 1;
@@ -317,23 +332,17 @@ export class GloamBeam implements WeaponInstance {
       this.cx = Math.cos(a);
       this.cz = Math.sin(a);
       ctx.enemies.forEachInRadius(p.x, p.z, this.len, this.onEnemy);
-      const m = this.pool.next();
-      m.position.set(p.x, 1.0, p.z);
-      m.rotation.set(0, -a, 0);
-      m.scale.set(this.len, 1, this.width * 2);
+      ctx.fx.lighthouseBeam(p.x, p.z, this.cx, this.cz, this.len, this.width, this.evolved, this.vt);
       if (Math.random() < 0.5) {
-        const k = Math.random() * this.len;
-        ctx.fx.spark(p.x + this.cx * k, 1.0, p.z + this.cz * k, 0, 0.6, 0, this.evolved ? 0xffb0e0 : 0x9ad8ff, 0.3, 0.3);
+        const k = 0.7 + Math.random() * (this.len - 0.7);
+        ctx.fx.spark(p.x + this.cx * k, 1.0 - 0.025 * k, p.z + this.cz * k, 0, 0.6, 0, this.evolved ? 0xffb0e0 : 0x9ad8ff, 0.3, 0.3);
       }
     }
-    this.pool.end();
   }
   private lv<T>(t: readonly T[]): T {
     return t[Math.min(t.length, this.level) - 1];
   }
-  dispose(): void {
-    this.pool.dispose();
-  }
+  dispose(): void {}
 }
 
 // ---------------------------------------------------------------- defs

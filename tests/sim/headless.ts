@@ -11,7 +11,7 @@ import { EnemyManager } from '../../src/entities/Enemies';
 import { ProjectileManager } from '../../src/entities/Projectiles';
 import { PickupManager } from '../../src/entities/Pickups';
 import { Director, RUN_LENGTH } from '../../src/game/Director';
-import { RunState } from '../../src/game/RunState';
+import { RunState, ashForRun } from '../../src/game/RunState';
 import { rollChoices, rollChest, applyChoice, type UpgradeChoice } from '../../src/game/Upgrades';
 import { getBiome } from '../../src/data/biomes';
 import { META_UPGRADES, CHARACTERS } from '../../src/data/meta';
@@ -315,8 +315,7 @@ export function simulateRun(opts: SimOptions = {}): SimResult {
   save.runs++;
   tracker.onRunEnd();
   const victory = bossKilled;
-  const minutes = run.elapsed / 60;
-  const ash = Math.round((run.ashEarned + run.kills / 20 + minutes * 5 + (victory ? 150 * biome.difficulty : 0)) * run.stats.greed);
+  const ash = ashForRun(run, victory, biome.difficulty); // shared with Game.endRun (src/game/RunState.ts)
   for (const w of run.weapons) w.dispose(ctx);
   return {
     survived: Math.round(run.elapsed),

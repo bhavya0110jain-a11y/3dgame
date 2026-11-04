@@ -60,6 +60,12 @@ function lnoise(L: Lattice, u: number, v: number): number {
 class Fbm {
   private oct: Lattice[] = [];
   private norm = 0;
+  get octaves(): readonly Lattice[] {
+    return this.oct;
+  }
+  get normalizer(): number {
+    return this.norm;
+  }
   constructor(period: number, seed: number, octaves: number) {
     let amp = 0.5;
     for (let i = 0; i < octaves; i++) {
@@ -76,6 +82,48 @@ class Fbm {
       amp *= 0.5;
     }
     return sum / this.norm;
+  }
+}
+
+/**
+ * Fills out[i] = lnoise(L, i / out.length, v) for a whole row at once (bit-compatible with lnoise): the lattice is
+ * interpolated in y once per lattice column, leaving one lerp per texel. Used for the un-warped fields.
+ */
+function lrow(L: Lattice, v: number, out: Float32Array, col: Float32Array, add: number, amp: number): void {
+  const p = L.p;
+  const y = v * p;
+  const yi = Math.floor(y);
+  let fy = y - yi;
+  fy = fy * fy * (3 - 2 * fy);
+  let y0 = yi % p;
+  if (y0 < 0) y0 += p;
+  const y1 = y0 + 1 === p ? 0 : y0 + 1;
+  const t = L.t;
+  for (let x = 0; x < p; x++) {
+    const a = t[y0 * p + x];
+    col[x] = a + (t[y1 * p + x] - a) * fy;
+  }
+  const W = out.length;
+  for (let i = 0; i < W; i++) {
+    const xx = (i / W) * p;
+    const xi = Math.floor(xx);
+    let fx = xx - xi;
+    fx = fx * fx * (3 - 2 * fx);
+    const x0 = xi % p;
+    const x1 = x0 + 1 === p ? 0 : x0 + 1;
+    const a = col[x0];
+    const r = a + (col[x1] - a) * fx;
+    out[i] = add ? out[i] + r * amp : r * amp;
+  }
+}
+
+/** Row version of Fbm.at (normalised sum of octaves). */
+function fbmRow(F: Fbm, v: number, out: Float32Array, col: Float32Array): void {
+  let amp = 0.5;
+  const oct = F.octaves;
+  for (let o = 0; o < oct.length; o++) {
+    lrow(oct[o], v, out, col, o, amp / F.normalizer);
+    amp *= 0.5;
   }
 }
 
@@ -97,12 +145,14 @@ export class GroundMask {
   }
 
   private cache = new Map<number, Uint8Array>();
+  /** Half-resolution float scratch for build() (allocated once). */
+  private half = new Float32Array((MASK_SIZE >> 1) * (MASK_SIZE >> 1) * 4);
+  private rowTmp = new Float32Array((MASK_SIZE >> 1) * 4);
   private current = NaN;
 
   /**
-   * Regenerates the field for a seed. Precomputed noise lattices keep this to roughly a quarter of the old
-   * hash-per-sample cost; results are cached per seed (LRU, CACHE_MAX), so the menu glade and biome re-entry are
-   * a 1 MiB memcpy. Same seed → same bytes, always.
+   * Regenerates the field for a seed (half-res evaluation + upsample, see build()). Results are cached per seed
+   * (LRU, CACHE_MAX), so the menu glade and biome re-entry are a 1 MiB memcpy. Same seed → same bytes, always.
    */
   generate(seed: number): void {
     if (seed === this.current) return;
@@ -120,32 +170,72 @@ export class GroundMask {
     this.texture.needsUpdate = true;
   }
 
+  /**
+   * The noise is evaluated on a half-resolution (256²) lattice and bilinearly upsampled 2x: every field is
+   * low-frequency (finest octave = 8 half-res texels per noise cell), so the result is visually identical to a
+   * full-res evaluation at a quarter of the cost (~25-35 ms → was ~120 ms on the slow CI box). The bytes stay the
+   * single source of truth for both CPU placement and the GPU, so they still agree exactly.
+   */
   private build(seed: number): void {
     const s = (seed * 7919) | 0;
     const N = MASK_SIZE;
-    const d = this.data;
+    const H = N >> 1;
+    const f = this.half;
     const warpU = new Lattice(4, s + 5);
     const warpV = new Lattice(4, s + 9);
     const patchF = new Fbm(4, s + 1, 4);
     const pathF = new Fbm(2, s + 2, 3);
     const wetF = new Fbm(5, s + 3, 4);
     const detF = new Fbm(16, s + 4, 2);
-    for (let j = 0; j < N; j++) {
-      const v = j / N;
-      for (let i = 0; i < N; i++) {
-        const u = i / N;
+    const sat = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
+    const rWu = new Float32Array(H);
+    const rWv = new Float32Array(H);
+    const rPatch = new Float32Array(H);
+    const rDet = new Float32Array(H);
+    const col = new Float32Array(64);
+    for (let j = 0; j < H; j++) {
+      const v = j / H;
+      lrow(warpU, v, rWu, col, 0, 1);
+      lrow(warpV, v, rWv, col, 0, 1);
+      fbmRow(patchF, v, rPatch, col);
+      fbmRow(detF, v, rDet, col);
+      for (let i = 0; i < H; i++) {
+        const u = i / H;
         // domain warp so paths meander
-        const wu = u + (lnoise(warpU, u, v) - 0.5) * 0.08;
-        const wv = v + (lnoise(warpV, u, v) - 0.5) * 0.08;
-        const patch = patchF.at(u, v);
-        const path = pathF.at(wu, wv);
-        const wet = wetF.at(wu, wv);
-        const det = detF.at(u, v);
-        const k = (j * N + i) * 4;
-        d[k] = Math.round(Math.min(1, Math.max(0, (patch - 0.5) * 1.8 + 0.5)) * 255);
-        d[k + 1] = Math.round(Math.min(1, Math.max(0, (path - 0.5) * 2.2 + 0.5)) * 255);
-        d[k + 2] = Math.round(Math.min(1, Math.max(0, (wet - 0.5) * 2.0 + 0.5)) * 255);
-        d[k + 3] = Math.round(det * 255);
+        const wu = u + (rWu[i] - 0.5) * 0.08;
+        const wv = v + (rWv[i] - 0.5) * 0.08;
+        const k = (j * H + i) * 4;
+        f[k] = sat((rPatch[i] - 0.5) * 1.8 + 0.5);
+        f[k + 1] = sat((pathF.at(wu, wv) - 0.5) * 2.2 + 0.5);
+        f[k + 2] = sat((wetF.at(wu, wv) - 0.5) * 2.0 + 0.5);
+        f[k + 3] = rDet[i];
+      }
+    }
+    // 2x bilinear upsample (periodic): full-res texel (i, j) sits at half-res (i/2, j/2). Odd rows average two
+    // half-res rows first; then every row is "copy, average with the right neighbour" per channel.
+    const d = this.data;
+    const R = this.rowTmp;
+    for (let j = 0; j < N; j++) {
+      const j0 = j >> 1;
+      const r0 = j0 * H * 4;
+      let src = f;
+      let base = r0;
+      if (j & 1) {
+        const r1 = ((j0 + 1) % H) * H * 4;
+        for (let k = 0; k < H * 4; k++) R[k] = (f[r0 + k] + f[r1 + k]) * 0.5;
+        src = R;
+        base = 0;
+      }
+      const o = j * N * 4;
+      for (let i0 = 0; i0 < H; i0++) {
+        const a = base + i0 * 4;
+        const b = base + (i0 + 1 === H ? 0 : i0 + 1) * 4;
+        const oo = o + i0 * 8;
+        for (let c = 0; c < 4; c++) {
+          const va = src[a + c] * 255;
+          d[oo + c] = (va + 0.5) | 0;
+          d[oo + 4 + c] = ((va + src[b + c] * 255) * 0.5 + 0.5) | 0;
+        }
       }
     }
   }

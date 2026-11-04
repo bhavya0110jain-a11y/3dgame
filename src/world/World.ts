@@ -4,7 +4,8 @@ import { Ambient } from './Ambient';
 import { Grass } from './Grass';
 import { Ground } from './Ground';
 import { GroundMask } from './GroundMask';
-import { CHUNK, Props, type Collider } from './Props';
+import { CHUNK, Props, type Collider, type PropQuality } from './Props';
+import { renderQuality, type Quality } from '../render/Quality';
 import { Sky } from './Sky';
 import { worldUniforms } from './WorldShading';
 
@@ -15,8 +16,22 @@ import { worldUniforms } from './WorldShading';
  *
  * Public API (used by Game / Player / Director / Enemies):
  *   group, biome, colliders, setBiome(biome, seed), setLight(px, pz, radius, time), update(px, pz),
- *   resolveCollision(p, radius)
+ *   resolveCollision(p, radius), setQuality(tier)
+ *
+ * Quality: World follows the tier the Renderer is drawing (renderQuality, polled in update(); call setQuality
+ * directly to force one). Grass blade count, decor density and shadow casting scale per tier (WORLD_TIERS);
+ * solid props / colliders are identical on every tier.
  */
+interface WorldTier {
+  /** Fraction of the grass blade budget drawn (blades widen to compensate). */
+  grass: number;
+  props: PropQuality;
+}
+const WORLD_TIERS: Record<Quality, WorldTier> = {
+  high: { grass: 1, props: { decor: 1, shadows: 'all', lantern: true } },
+  medium: { grass: 0.7, props: { decor: 0.9, shadows: 'tall', lantern: false } },
+  low: { grass: 0.4, props: { decor: 0.75, shadows: 'none', lantern: false } },
+};
 export class World {
   readonly group = new THREE.Group();
   private ground: Ground;
@@ -28,6 +43,8 @@ export class World {
   private lastChunk = { x: 9999, z: 9999 };
   biome!: BiomeDef;
   private seed = 1;
+  private quality: Quality | null = null;
+  private qualityVersion = -1;
 
   /** Collision circles for solid props (x, z, r). */
   get colliders(): Collider[] {
@@ -72,15 +89,32 @@ export class World {
     this.ambient.update();
   }
 
+  /** Rescales grass, decor density and prop shadow casting for a render tier (cheap when unchanged). */
+  setQuality(q: Quality): void {
+    if (q === this.quality) return;
+    this.quality = q;
+    const t = WORLD_TIERS[q];
+    this.grass.setQuality(t.grass);
+    const lantern = t.props.lantern && renderQuality.lanternShadows;
+    if (this.props.setQuality({ ...t.props, lantern })) this.lastChunk = { x: 9999, z: 9999 };
+  }
+
   update(px: number, pz: number): void {
+    if (renderQuality.version !== this.qualityVersion) {
+      this.qualityVersion = renderQuality.version;
+      this.quality = null;
+      this.setQuality(renderQuality.tier);
+    }
     this.ground.mesh.position.set(Math.round(px / 50) * 50, 0, Math.round(pz / 50) * 50);
     this.sky.update(px, pz, worldUniforms.uTime.value);
     const cx = Math.floor(px / CHUNK);
     const cz = Math.floor(pz / CHUNK);
-    if (cx === this.lastChunk.x && cz === this.lastChunk.z) return;
-    this.lastChunk.x = cx;
-    this.lastChunk.z = cz;
-    this.props.rebuild(cx, cz, this.seed, this.biome.ground.waterLevel, this.biome.propDensity);
+    if (cx !== this.lastChunk.x || cz !== this.lastChunk.z) {
+      this.lastChunk.x = cx;
+      this.lastChunk.z = cz;
+      this.props.rebuild(cx, cz, this.seed, this.biome.ground.waterLevel, this.biome.propDensity);
+    }
+    this.props.updateView(px, pz);
   }
 
   /** Pushes a circle out of solid props. Returns adjusted position in-place. */

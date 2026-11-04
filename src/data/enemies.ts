@@ -63,7 +63,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
     color: 0x2a2440, eyeColor: 0xb06cff, shape: 'shade', behavior: 'chase', knockbackResist: 0,
   },
   crawler: {
-    id: 'crawler', name: 'Crawler', hp: 14, speed: 3.3, damage: 7, xp: 2, radius: 0.5, scale: 1,
+    id: 'crawler', name: 'Crawler', hp: 14, speed: 3.3, damage: 6, xp: 2, radius: 0.5, scale: 1,
     color: 0x2c1f1a, eyeColor: 0xff4a3c, shape: 'crawler', behavior: 'swarm', knockbackResist: 0.1,
   },
   wisp: {
@@ -71,11 +71,11 @@ export const ENEMIES: Record<string, EnemyDef> = {
     color: 0x1a2a3a, eyeColor: 0x5ce1ff, shape: 'wisp', behavior: 'swarm', knockbackResist: 0,
   },
   brute: {
-    id: 'brute', name: 'Gloom Brute', hp: 90, speed: 2.0, damage: 16, xp: 8, radius: 0.95, scale: 1.7,
+    id: 'brute', name: 'Gloom Brute', hp: 90, speed: 2.0, damage: 13, xp: 8, radius: 0.95, scale: 1.7,
     color: 0x251c2c, eyeColor: 0xff7a2a, shape: 'brute', behavior: 'chase', knockbackResist: 0.7,
   },
   stalker: {
-    id: 'stalker', name: 'Stalker', hp: 30, speed: 2.4, damage: 12, xp: 4, radius: 0.55, scale: 1.1,
+    id: 'stalker', name: 'Stalker', hp: 30, speed: 2.4, damage: 10, xp: 4, radius: 0.55, scale: 1.1,
     color: 0x1c1c26, eyeColor: 0xffe14a, shape: 'stalker', behavior: 'dash', knockbackResist: 0.3, attackInterval: 3.2,
   },
   spitter: {
@@ -99,7 +99,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
     splitInto: 'jellyling', splitCount: 3, biomes: ALL_NIGHTS,
   },
   jellyling: {
-    id: 'jellyling', name: 'Jellyling', hp: 7, speed: 3.6, damage: 4, xp: 1, radius: 0.38, scale: 0.65,
+    id: 'jellyling', name: 'Jellyling', hp: 7, speed: 3.4, damage: 3, xp: 1, radius: 0.38, scale: 0.65,
     color: 0x3a2a6a, eyeColor: 0xff8af0, shape: 'blob', behavior: 'swarm', knockbackResist: 0,
   },
   /** Exploder: rushes in, primes (telegraphed ring), then bursts. Killing it early detonates it on its friends. */

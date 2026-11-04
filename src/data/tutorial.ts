@@ -38,5 +38,7 @@ export const HINTS: Record<string, HintDef> = {
 
 /** Seconds after the run starts before the movement hint appears (lets the camera settle). */
 export const HINT_MOVE_DELAY = 0.8;
+/** Run seconds before the 'ember' hint may fire (the movement hint gets its time on screen first). */
+export const HINT_EMBER_AFTER = 7;
 /** Light fraction below which the low-light hint fires. */
 export const HINT_LOW_LIGHT = 0.35;

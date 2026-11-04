@@ -1,0 +1,57 @@
+# Last Lantern — regenerate the store art (screenshots, capsules, key art, gameplay capture) from a fresh build.
+# Manual only (Actions → Store art → Run workflow): GitHub runners render through SwiftShader, so the full set takes
+# ~15–30 min (+30–60 min with the video). The result is uploaded as an artifact; commit the files you want to keep
+# into production/release/store-art/. Locally: `node tools/package-screens.mjs` (docs/store/README.md).
+name: Store art
+
+on:
+  workflow_dispatch:
+    inputs:
+      video:
+        description: 'Also record the gameplay capture (mp4/webm/gif, slow)'
+        type: boolean
+        default: false
+      only:
+        description: 'Only these shots (comma list, e.g. horde,boss). Empty = all'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  PLAYWRIGHT_VERSION: '1.63.0'
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+jobs:
+  store-art:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright + ffmpeg
+        run: |
+          npm install --no-save playwright@${{ env.PLAYWRIGHT_VERSION }}
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y ffmpeg
+      - run: npm run build
+      - name: Capture + compose
+        env:
+          ONLY: ${{ inputs.only }}
+          VIDEO: ${{ inputs.video }}
+        run: |
+          args=()
+          if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
+          if [ "$VIDEO" = "true" ]; then args+=(--video); fi
+          node tools/package-screens.mjs --out store-art "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: store-art
+          path: store-art
+          retention-days: 14

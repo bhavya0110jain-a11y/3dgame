@@ -15,6 +15,8 @@ export const PS_BEAM = 1;
 export const PS_VOID = 2;
 export const PS_MARKER = 3;
 export const PS_FROST = 4;
+/** 5 MOTH   a glowing moth: hot body, two pairs of flapping translucent wings with bright rims, wing-dust tail */
+export const PS_MOTH = 5;
 
 export function createProjectileBillboards(capacity: number): {
   mesh: THREE.Mesh;
@@ -95,7 +97,27 @@ export function createProjectileBillboards(capacity: number): {
         vec3 col = vCol.rgb;
         vec3 outc;
         float occl = 0.0;
-        if (style < 0.5 || style > 3.5) {
+        if (style > 4.5) {
+          // MOTH: wings are lobes mirrored across the flight axis; the flap squashes their span. Glowing rims over a
+          // faintly occluding fill give a readable silhouette instead of a blob.
+          float flap = 0.45 + 0.55 * abs(sin(uTime * 14.0 + vSty.y * 40.0));
+          float body = exp(-(L.x * L.x * 1.5 + L.y * L.y * 16.0));
+          vec2 w = vec2(L.x, abs(L.y) / flap);
+          // forewing: long ellipse swept back from the shoulder; hindwing: smaller, rounder, further back
+          vec2 q1 = w - vec2(-0.12, 0.66);
+          q1 = vec2(q1.x * 0.906 + q1.y * 0.423, -q1.x * 0.423 + q1.y * 0.906);
+          float e1 = length(q1 / vec2(0.3, 0.62));
+          vec2 q2 = w - vec2(-0.5, 0.4);
+          q2 = vec2(q2.x * 0.643 + q2.y * 0.766, -q2.x * 0.766 + q2.y * 0.643);
+          float e2 = length(q2 / vec2(0.24, 0.4));
+          float wing = max(1.0 - smoothstep(0.8, 1.0, e1), (1.0 - smoothstep(0.8, 1.0, e2)) * 0.9);
+          float rim = max(exp(-pow((e1 - 0.9) / 0.1, 2.0)), exp(-pow((e2 - 0.9) / 0.11, 2.0)) * 0.8);
+          float spot = exp(-pow(length((w - vec2(-0.16, 0.8)) / 0.12), 2.0));
+          float tt = clamp(-L.x / max(vTail, 1e-3), 0.0, 1.0);
+          float tail = (L.x < 0.0 ? 1.0 : 0.0) * exp(-(L.y * L.y) * 6.0) * pow(1.0 - tt, 2.0) * 0.3;
+          outc = col * (wing * 0.2 + rim * 0.7 + spot * 0.6 + tail) + vec3(1.0, 0.95, 0.8) * body * 0.65 * length(col) * 0.5;
+          occl = wing * 0.35;
+        } else if (style < 0.5 || style > 3.5) {
           // COMET / FROST glow
           float head = exp(-r2 * 1.8);
           float core = exp(-r2 * 7.0);

@@ -1,8 +1,21 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { EnemyShape } from '../data/enemies';
-import { getModel } from '../render/Assets';
+import { getModel, MODEL_LIST } from '../render/Assets';
 import type { Enemy } from './Enemies';
+
+/** Regular (non-boss) enemy GLBs that ship a `<name>_lo` horde LOD (tools/blender/characters/build.py). */
+export const ENEMY_LOD_MODELS = ['shade', 'crawler', 'wisp', 'brute', 'stalker', 'spitter', 'bog', 'knight', 'blob', 'bloater', 'warden'];
+
+/** Makes sure the asset loader fetches every enemy GLB this module draws (new shapes + horde LODs). Idempotent;
+ *  runs at import, i.e. before main.ts calls loadAssets(). Files missing from the manifest are simply skipped. */
+export function registerEnemyModels(list: { enemies: string[] } = MODEL_LIST): void {
+  for (const n of ENEMY_LOD_MODELS) {
+    if (!list.enemies.includes(n)) list.enemies.push(n);
+    if (!list.enemies.includes(n + '_lo')) list.enemies.push(n + '_lo');
+  }
+}
+registerEnemyModels();
 
 const ni = (g: THREE.BufferGeometry) => (g.index ? g.toNonIndexed() : g);
 const merge = (gs: THREE.BufferGeometry[]) => mergeGeometries(gs.map(ni));
@@ -14,13 +27,28 @@ function eyes(y: number, z: number, spread: number, size: number): THREE.BufferG
   ]);
 }
 
+export interface EnemyModel {
+  body: THREE.BufferGeometry;
+  eyes: THREE.BufferGeometry;
+  vertexColors: boolean;
+}
+
 /** Returns body + eye geometry for a shape. Models face +Z, sit on y=0, unit scale ~1 unit tall. */
-export function buildEnemyModel(shape: EnemyShape): { body: THREE.BufferGeometry; eyes: THREE.BufferGeometry; vertexColors: boolean } {
+export function buildEnemyModel(shape: EnemyShape): EnemyModel {
   const m = getModel(shape);
   if (m && m.body) {
     return { body: m.body, eyes: m.glow ?? new THREE.BufferGeometry(), vertexColors: true };
   }
   return { ...buildProcedural(shape), vertexColors: false };
+}
+
+/** Horde LOD (~600-900 triangles incl. a few dozen for the eyes) for a shape, or null when the GLB has none
+ *  (bosses, or the full model failed to load: never mix a procedural body with a GLB LOD). */
+export function buildEnemyLodModel(shape: EnemyShape): EnemyModel | null {
+  if (!getModel(shape)?.body) return null;
+  const m = getModel(shape + '_lo');
+  if (!m || !m.body) return null;
+  return { body: m.body, eyes: m.glow ?? new THREE.BufferGeometry(), vertexColors: true };
 }
 
 function buildProcedural(shape: EnemyShape): { body: THREE.BufferGeometry; eyes: THREE.BufferGeometry } {
@@ -203,17 +231,21 @@ function buildProcedural(shape: EnemyShape): { body: THREE.BufferGeometry; eyes:
 // ============================================================================================ materials
 /**
  * Per-instance FX attribute (vec4) driving the enemy body shader:
- *   x = hit flash (0..1), y = elite aura, z = frozen/slowed, w = burning.
+ *   x = hit flash (0..1; negative = spawn-in darkness, -1 = black), y = elite aura, z = frozen/slowed, w = burning.
+ * The glow (eyes) batch shares the same attribute object, so one write drives both meshes.
  */
 export const ENEMY_FX_ATTR = 'aFx';
 
-/** Shares geometry buffers but adds a per-instance FX attribute (so batches never mutate cached models). */
-export function withEnemyFx(src: THREE.BufferGeometry, capacity: number): THREE.BufferGeometry {
+/** Shares geometry buffers but adds a per-instance FX attribute (so batches never mutate cached models).
+ *  Pass `fx` to share one attribute between a body and its glow geometry. */
+export function withEnemyFx(src: THREE.BufferGeometry, capacity: number, fx?: THREE.InstancedBufferAttribute): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   for (const [k, v] of Object.entries(src.attributes)) g.setAttribute(k, v);
   if (src.index) g.setIndex(src.index);
-  const fx = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4);
-  fx.setUsage(THREE.DynamicDrawUsage);
+  if (!fx) {
+    fx = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4);
+    fx.setUsage(THREE.DynamicDrawUsage);
+  }
   g.setAttribute(ENEMY_FX_ATTR, fx);
   g.boundingSphere = src.boundingSphere;
   return g;
@@ -243,20 +275,52 @@ export function makeEnemyBodyMaterial(vertexColors: boolean): THREE.MeshStandard
         `#include <color_fragment>
         float fxLum = dot(diffuseColor.rgb, vec3(0.3, 0.5, 0.2));
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55, 0.85, 1.0) * (0.45 + fxLum), vFx.z * 0.65);
-        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.97, 0.94), vFx.x * 0.6);`,
+        float fxFlash = max(vFx.x, 0.0);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.97, 0.94), fxFlash * 0.6);
+        diffuseColor.rgb *= 1.0 + min(vFx.x, 0.0);`,
       )
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
         float fxRim = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 2.2);
         totalEmissiveRadiance += diffuseColor.rgb * (uRimColor * fxRim * 0.7 + 0.07);
-        totalEmissiveRadiance += vec3(1.0, 0.9, 0.82) * vFx.x * 0.3;
+        totalEmissiveRadiance += vec3(1.0, 0.9, 0.82) * fxFlash * 0.3;
         totalEmissiveRadiance += vec3(1.0, 0.7, 0.22) * (0.12 + fxRim * 2.2) * vFx.y;
         totalEmissiveRadiance += vec3(0.5, 0.8, 1.0) * fxRim * vFx.z * 0.9;
         totalEmissiveRadiance += vec3(1.0, 0.38, 0.08) * (0.15 + fxRim * 1.8) * vFx.w;`,
+      )
+      // soft knee on direct light: enemies pressing into the lantern pool stay readable (and keep their hue)
+      // instead of blowing out to pink-white; moonlight (below the knee) is untouched
+      .replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+        reflectedLight.directDiffuse = reflectedLight.directDiffuse / (1.0 + max(reflectedLight.directDiffuse - 0.35, 0.0) * 1.3);`,
       );
   };
   mat.customProgramCacheKey = () => 'enemy-body-fx';
+  return mat;
+}
+
+/** Unlit glow material (eyes, flames, runes) with the same per-instance FX: the hit flash pushes the glow to a
+ *  hot white (wisps are mostly glow, so their flash must show here), burning warms it. Spawn darkness is
+ *  ignored on purpose: the eyes open in the dark first, then the body rises into the light. */
+export function makeEnemyGlowMaterial(vertexColors: boolean, color = 0xffffff): THREE.MeshBasicMaterial {
+  const mat = new THREE.MeshBasicMaterial({ color, vertexColors });
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec4 aFx;\nvarying vec4 vFx;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFx = aFx;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec4 vFx;')
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        float gFlash = max(vFx.x, 0.0);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(2.4, 2.3, 2.2), gFlash * 0.75);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(2.2, 0.9, 0.3), vFx.w * 0.35);`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'enemy-glow-fx';
   return mat;
 }
 
@@ -270,9 +334,19 @@ export interface EnemyPose {
   pitch: number; // + = lean forward
   yaw: number; // extra heading wobble
   roll: number; // + = lean to its left
+  /** Value for the FX attribute's x: hit / death flash (0..1) or spawn darkness (< 0). */
+  flash: number;
 }
 
+/** Seconds an enemy takes to rise out of the ground / shadow after spawning (bosses: a slower emergence). */
+export const SPAWN_TIME = 0.35;
+export const BOSS_SPAWN_TIME = 1.0;
+/** Death animation length: regular enemies squash + shrink + sink; bosses collapse. */
+export const DEATH_TIME = 0.25;
+export const BOSS_DEATH_TIME = 1.2;
+
 const sat = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const smooth01 = (v: number) => v * v * (3 - 2 * v);
 
 /**
  * Procedural per-shape animation for instanced enemies (no allocations): floaty ghosts, skittering
@@ -382,6 +456,56 @@ export function poseEnemy(e: Enemy, out: EnemyPose): EnemyPose {
       }
       break;
     }
+    case 'blob': {
+      // jelly lurch in sync with the splitter's surge (Enemies: speed pulses with sin(phase*4 + id)):
+      // stretches forward while surging, gathers up tall in between, with a fast secondary jiggle
+      const s = Math.sin(t * 4 + e.id);
+      const surge = Math.max(0, s);
+      const gather = Math.max(0, -s);
+      const jig = Math.sin(t * 13 + v * 7) * 0.035;
+      sy = 1 - surge * 0.14 + gather * 0.1 + jig;
+      sx = 1 + surge * 0.06 - gather * 0.05 - jig * 0.6;
+      sz = 1 + surge * 0.16 - gather * 0.05 - jig * 0.6;
+      pitch = surge * 0.16 - gather * 0.05;
+      roll = Math.sin(t * 2.5 + v) * 0.07;
+      y = gather * gather * 0.05;
+      break;
+    }
+    case 'bloater': {
+      // skittering tick: rapid leg hop + breathing abdomen; primed (state 3) = rears up, swells and shakes
+      const hop = Math.abs(Math.sin(t * 17 + v));
+      y = hop * 0.045;
+      roll = Math.sin(t * 17 + v) * 0.06;
+      yaw = Math.sin(t * 7.1 + v * 3) * 0.1;
+      sy = 1 + Math.sin(t * 6 + v) * 0.035;
+      sx = sz = 1 - Math.sin(t * 6 + v) * 0.02;
+      pitch = 0.06;
+      if (e.state === 3) {
+        const pk = sat(e.stateTime / (e.def.fuse ?? 0.85));
+        const shake = Math.sin(t * 85 + v) * (0.05 + 0.1 * pk);
+        pitch = -0.28 * pk;
+        yaw = shake;
+        roll = Math.sin(t * 71) * 0.06 * pk;
+        sy = 1 + 0.12 * pk + Math.sin(t * 40) * 0.04 * pk;
+        sx = sz = 1 + 0.1 * pk;
+        y = 0.04 * pk;
+      }
+      break;
+    }
+    case 'warden': {
+      // stately sentinel glide; once its ward breaks it hunches and sways, flustered
+      const s = Math.sin(t * 2.6 + v);
+      y = Math.abs(s) * 0.03;
+      roll = s * 0.045;
+      pitch = 0.03;
+      sy = 1 + Math.sin(t * 5.2 + v) * 0.015;
+      if (e.maxShield > 0 && e.shield <= 0) {
+        pitch = 0.16 + Math.sin(t * 3.3 + v) * 0.04;
+        roll = s * 0.09;
+        sy *= 0.96;
+      }
+      break;
+    }
     case 'stag': {
       const s = Math.sin(t * 5);
       y = Math.abs(s) * 0.08;
@@ -450,6 +574,54 @@ export function poseEnemy(e: Enemy, out: EnemyPose): EnemyPose {
   const kbS = e.kbx * cf - e.kbz * sf;
   pitch += Math.max(-0.5, Math.min(0.5, kbF * 0.05));
   roll += Math.max(-0.4, Math.min(0.4, -kbS * 0.04));
+  let flash = f;
+  const boss = !!e.def.boss;
+  if (e.dying >= 0) {
+    const d = e.dying;
+    if (boss) {
+      // collapse: shudder + white pulses, topple forward while sinking, darken into shadow, shrink away
+      const k = sat(d / BOSS_DEATH_TIME);
+      const shud = 1 - sat(k / 0.35);
+      yaw += Math.sin(d * 55) * 0.09 * shud;
+      roll += Math.sin(d * 43) * 0.05 * shud;
+      const fall = smooth01(sat((k - 0.2) / 0.6));
+      pitch += fall * 1.05;
+      roll += fall * 0.22;
+      sy *= 1 - 0.22 * fall;
+      y -= smooth01(sat((k - 0.45) / 0.55)) * 0.9;
+      const g = 1 - smooth01(sat((k - 0.72) / 0.28)) * 0.92;
+      sx *= g;
+      sy *= g;
+      sz *= g;
+      flash = k < 0.4 ? 0.55 + 0.45 * Math.sin(d * 38) : k < 0.6 ? 1 - (k - 0.4) * 5 : -sat((k - 0.6) / 0.4) * 0.85;
+    } else {
+      // pop: squash flat (white flash), then shrink and sink into the ground
+      const k = sat(d / DEATH_TIME);
+      const sq = Math.sin(sat(k * 1.7) * Math.PI * 0.5);
+      sy *= 1 - 0.55 * sq;
+      const w = 1 + 0.42 * sq * (1 - k);
+      const g = 1 - k * k * 0.8;
+      sx *= w * g;
+      sz *= w * g;
+      sy *= g;
+      y -= k * k * 0.3;
+      flash = k < 0.45 ? 1 : 1 - (k - 0.45) / 0.55;
+    }
+  } else {
+    const st = boss ? BOSS_SPAWN_TIME : SPAWN_TIME;
+    if (e.age < st) {
+      // rise out of the ground / fade in from shadow, with a little stretch overshoot
+      const k = sat(e.age / st);
+      const ke = 1 - (1 - k) * (1 - k);
+      y -= (1 - ke) * (boss ? 1.6 : 1.1);
+      const g = 0.7 + 0.3 * ke;
+      sx *= g;
+      sz *= g;
+      sy *= g * (1 + Math.sin(k * Math.PI) * 0.14);
+      if (f <= 0) flash = -(1 - k) * 0.9;
+    }
+  }
+  out.flash = flash;
   out.y = y;
   out.sx = sx;
   out.sy = sy;
@@ -461,7 +633,7 @@ export function poseEnemy(e: Enemy, out: EnemyPose): EnemyPose {
 }
 
 /** Shared scratch pose (single-threaded render loop: reuse to avoid per-frame allocations). */
-export const POSE_SCRATCH: EnemyPose = { y: 0, sx: 1, sy: 1, sz: 1, pitch: 0, yaw: 0, roll: 0 };
+export const POSE_SCRATCH: EnemyPose = { y: 0, sx: 1, sy: 1, sz: 1, pitch: 0, yaw: 0, roll: 0, flash: 0 };
 const poseEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 /** Writes facing + pose lean into a quaternion. */
 export function poseQuaternion(facing: number, p: EnemyPose, out: THREE.Quaternion): THREE.Quaternion {

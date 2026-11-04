@@ -5,8 +5,9 @@ import { Lighting } from './Lighting';
 import { rimUniforms } from './materials';
 import { PostPipeline, type PostQuality } from './post/PostPipeline';
 import { tintMultiplier } from './post/GradeShader';
+import { renderQuality, type Quality } from './Quality';
 
-export type Quality = 'low' | 'medium' | 'high';
+export type { Quality } from './Quality';
 
 interface TierSpec {
   /** Max device pixel ratio. */
@@ -18,9 +19,13 @@ interface TierSpec {
 
 /**
  * Quality tiers. Budget targets (mid laptop iGPU/low dGPU, 1080p, 300+ enemies):
- *   high   – DPR ≤ 1.75, 2048 PCF-soft moon shadows, lantern cube shadows, full-res N8AO, bloom, SMAA, CA
- *   medium – DPR ≤ 1.25, 1024 moon shadows, half-res N8AO, bloom, FXAA, CA
- *   low    – DPR 1, no shadows, no AO, no bloom, FXAA (grade/vignette stay: one cheap fullscreen pass)
+ *   high   – DPR ≤ 1.75, 2048 PCF-soft moon shadows, lantern cube shadows (near props only), full-res N8AO,
+ *            bloom, SMAA, CA; World: full grass, full prop density, every solid prop casts
+ *   medium – DPR ≤ 1.25, 1024 moon shadows, half-res N8AO, bloom, FXAA, CA; World: ~70% grass, 90% props,
+ *            only tall props cast
+ *   low    – DPR 1, no shadows, no AO, no bloom, FXAA (grade/vignette stay: one cheap fullscreen pass);
+ *            World: ~40% (wider) grass blades, 75% props
+ * World-side scaling lives in World.setQuality, driven through renderQuality (src/render/Quality.ts).
  */
 const TIERS: Record<Quality, TierSpec> = {
   high: { dpr: 1.75, moonShadow: 2048, lanternShadow: 512, post: { ao: 'full', bloom: true, aa: 'smaa', ca: true } },
@@ -36,10 +41,12 @@ const RES_STEPS = [1, 0.85, 0.72];
  * Public API used elsewhere: renderer, scene, camera, damagePulse, setQuality(q), resize(), render(time, dt),
  * applyBiome(biome), lighting.
  *
- * Automatic quality fallback: frame time is tracked with an EMA; if it stays above ~20 ms for 3 s the internal
- * resolution steps down (1 → 0.85 → 0.72), then the effective tier drops (high → medium → low). If frames are
- * comfortably fast for a while it steps back up, never above the tier chosen in Settings. Disabled under
- * automation (navigator.webdriver) so smoke screenshots show the real tier.
+ * Automatic quality fallback (see trackFrameTime): frame time is averaged over 2 s windows. Two slow windows in a
+ * row (avg > 20 ms) step the internal resolution down (1 → 0.85 → 0.72), then the effective tier (high → medium
+ * → low). After a long run of smooth windows (avg < 17.4 ms) it tries one step back up, never above the tier chosen
+ * in Settings; a level that had to be abandoned after such an upgrade becomes a ceiling for the session, so it
+ * can never flap. The first second after any change (shader compiles, render-target reallocation) is ignored.
+ * Disabled under automation (navigator.webdriver) so smoke screenshots show the real tier.
  */
 export class Renderer {
   readonly renderer: THREE.WebGLRenderer;
@@ -56,11 +63,17 @@ export class Renderer {
   private quality: Quality = 'high';
   private effective: Quality = 'high';
   private resStep = 0;
-  private frameMs = 16.7;
-  private slowFor = 0;
-  private fastFor = 0;
-  private upgradeDelay = 10;
+  // adaptive quality (see trackFrameTime)
   private lastNow = 0;
+  private winTime = 0;
+  private winFrames = 0;
+  private settle = 1;
+  private slowWins = 0;
+  private fastWins = 0;
+  private upgradeWins = 5;
+  /** Highest (tier, resStep) level allowed after a failed upgrade, as a level index; Infinity = none. */
+  private ceiling = Infinity;
+  private upgraded = false;
 
   constructor(canvas: HTMLCanvasElement) {
     // Throws when WebGL2 is unavailable: main.ts' boot() catch shows the "lantern would not light" fallback.
@@ -100,12 +113,15 @@ export class Renderer {
 
   /** User-selected tier (Settings). Resets the automatic fallback. */
   setQuality(q: Quality): void {
+    if (!(q in TIERS)) q = 'high'; // BUG-QA-015
     this.quality = q;
     this.effective = q;
     this.resStep = 0;
-    this.slowFor = 0;
-    this.fastFor = 0;
-    this.upgradeDelay = 10;
+    this.slowWins = 0;
+    this.fastWins = 0;
+    this.upgradeWins = 5;
+    this.ceiling = Infinity;
+    this.upgraded = false;
     this.applyTier();
   }
 
@@ -133,6 +149,12 @@ export class Renderer {
     this.lighting.setQuality({ moonShadow: t.moonShadow, lanternShadow: t.lanternShadow });
     this.renderer.shadowMap.enabled = t.moonShadow > 0 || t.lanternShadow > 0;
     this.post.setQuality(t.post);
+    renderQuality.tier = this.effective;
+    renderQuality.lanternShadows = t.lanternShadow > 0;
+    renderQuality.version++;
+    this.settle = 1;
+    this.winTime = 0;
+    this.winFrames = 0;
     this.resize();
   }
 
@@ -152,56 +174,77 @@ export class Renderer {
   render(time: number, dt: number): void {
     this.damagePulse = Math.max(0, this.damagePulse - dt * 2.5);
     const u = this.post.grade.uniforms;
-    u.uDamage.value = this.damagePulse;
+    // BUG-QA-014: reduced flashing dims the full-screen damage pulse
+    u.uDamage.value = this.damagePulse * (document.documentElement.classList.contains('a11y-noflash') ? 0.35 : 1);
     u.uTime.value = time % 100;
     this.post.render(dt);
     this.trackFrameTime();
   }
 
   // ------------------------------------------------------------------ automatic quality fallback
+  /** Level index: tier * RES_STEPS.length + (RES_STEPS.length - 1 - resStep); higher = prettier. */
+  private level(q: Quality = this.effective, r = this.resStep): number {
+    return ORDER.indexOf(q) * RES_STEPS.length + (RES_STEPS.length - 1 - r);
+  }
+
   private trackFrameTime(): void {
     const now = performance.now();
     const ft = now - this.lastNow;
     this.lastNow = now;
     if (!this.autoQuality || ft <= 0 || ft > 100 || document.hidden) return; // ignore stalls / tab switches
-    this.frameMs += (ft - this.frameMs) * 0.05;
     const s = ft / 1000;
-    if (this.frameMs > 20.5) {
-      this.slowFor += s;
-      this.fastFor = 0;
-    } else if (this.frameMs < 13.5) {
-      this.fastFor += s;
-      this.slowFor = Math.max(0, this.slowFor - s);
-    } else {
-      this.slowFor = Math.max(0, this.slowFor - s * 0.5);
-      this.fastFor = 0;
+    if (this.settle > 0) {
+      this.settle -= s;
+      return;
     }
-    if (this.slowFor > 3) this.stepDown();
-    else if (this.fastFor > this.upgradeDelay) this.stepUp();
+    this.winTime += ft;
+    this.winFrames++;
+    if (this.winTime < 2000) return;
+    const avg = this.winTime / this.winFrames;
+    this.winTime = 0;
+    this.winFrames = 0;
+    if (avg > 20) {
+      this.fastWins = 0;
+      if (++this.slowWins >= 2) this.stepDown();
+    } else if (avg < 17.4) {
+      // not dropping frames (a 60 Hz display never reports faster than ~16.7 ms, so this is the only usable bar)
+      this.slowWins = 0;
+      if (++this.fastWins >= this.upgradeWins) this.stepUp();
+    } else {
+      this.slowWins = 0;
+      this.fastWins = 0;
+    }
   }
 
   private stepDown(): void {
-    this.slowFor = 0;
-    this.fastFor = 0;
-    this.frameMs = 16.7;
+    this.slowWins = 0;
+    this.fastWins = 0;
+    // an upgrade that could not hold: that level is off-limits for the rest of the session (no flapping)
+    if (this.upgraded) this.ceiling = Math.min(this.ceiling, this.level() - 1);
+    this.upgraded = false;
     if (this.resStep < RES_STEPS.length - 1) this.resStep++;
     else if (this.effective !== 'low') {
       this.effective = ORDER[ORDER.indexOf(this.effective) - 1];
       this.resStep = 0;
     } else return;
-    // every fallback makes the next upgrade attempt more cautious (avoids oscillating)
-    this.upgradeDelay = Math.min(120, this.upgradeDelay * 2);
+    this.upgradeWins = Math.min(60, this.upgradeWins * 2);
     console.info(`[render] auto quality → ${this.effective} @ ${RES_STEPS[this.resStep]}x`);
     this.applyTier();
   }
 
   private stepUp(): void {
-    this.fastFor = 0;
-    if (this.resStep > 0) this.resStep--;
-    else if (this.effective !== this.quality) {
-      this.effective = ORDER[ORDER.indexOf(this.effective) + 1];
-      this.resStep = RES_STEPS.length - 1;
+    this.fastWins = 0;
+    let q = this.effective;
+    let r = this.resStep;
+    if (r > 0) r--;
+    else if (q !== this.quality) {
+      q = ORDER[ORDER.indexOf(q) + 1];
+      r = RES_STEPS.length - 1;
     } else return;
+    if (this.level(q, r) > this.ceiling) return;
+    this.effective = q;
+    this.resStep = r;
+    this.upgraded = true;
     console.info(`[render] auto quality ↑ ${this.effective} @ ${RES_STEPS[this.resStep]}x`);
     this.applyTier();
   }

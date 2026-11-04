@@ -3,6 +3,57 @@
 > Owner: release-manager. Tick items in PRs. Each line names the evidence that closes it.
 > Related: `production/milestones/v1.0.md` (backlog), `docs/store/*` (copy), `production/release/ci/release-desktop.yml`.
 
+## Status after Sprint 2 (2026-11-04)
+
+**Done (verified in this sprint)**
+- CI (`.github/workflows/game-ci.yml`): typecheck → vitest → build → itch zip static checks on every push/PR;
+  browser smoke (SwiftShader, fixed-step, one retry) + itch sub-folder boot check; perf is advisory. Electron's
+  binary download is skipped (`ELECTRON_SKIP_BINARY_DOWNLOAD=1`).
+- Store art generated **from the game** and re-runnable: 10 HUD screenshots, 12 clean plates, 17 capsules (all current
+  Steam sizes incl. a native 3840×1240 library hero, itch cover, OG image, transparent logo) in
+  `production/release/store-art/`. One command: `node tools/package-screens.mjs` (`docs/store/README.md`).
+- Gameplay capture for trailer/GIF: `store-art/capture/gameplay.{mp4,webm,gif}` (fixed-step, 1280×720).
+- Web build: `npm run package:web` → `release/last-lantern-web.zip` (126 files, ~7.4 MB zipped). `--verify` boots it from an
+  itch-style sub-folder with 0 missing files and 0 console errors ✅.
+- Favicon (SVG + 32 px PNG), apple-touch icon, PWA-lite manifest, page title/description, Open Graph + Twitter card
+  meta (`public/og-image.png`).
+- Store copy counts re-checked against `src/data` (11 weapons, 11 evolutions, 14 relics, 12 shadows + 3 masters,
+  3 nights, 6 bearers, 13 Hearth upgrades, 24 achievements).
+
+**Found while capturing (P0, owner: characters/gameplay):** the bearer model does not follow the player during a
+vigil. `Player.update` lost `this.group.position.set(this.x, 0, this.z)` in the sprint-1 animation refactor
+(eb9cca8), so the model stays at the world origin while the light, weapons and camera move on. Verified on an
+unmodified build: player x = 3.84, model x = 0.00 after 6 s of walking. `tools/package-screens.mjs` mirrors the sync
+so the store art is correct. Remove that workaround after the fix lands.
+
+**Left for the owner (cannot be done by agents)**: everything in §0, signing certificates (§1), Steamworks forms (§2),
+real-GPU trailer capture (§4). Steps below.
+
+### Owner steps: itch.io (about 1 hour)
+1. Create the project at itch.io → *Upload new project*. Fill the fields from `docs/store/itch-page.md` (Kind: HTML,
+   viewport 1280×720, mobile friendly, fullscreen button, click to launch).
+2. `npm run package:web` → upload `release/last-lantern-web.zip`, tick "This file will be played in the browser".
+3. Cover: `production/release/store-art/capsules/itch-cover-630x500.png`. Screenshots: the five listed in itch-page.md.
+4. Fill the AI disclosure, set the demo free, desktop builds $4.99 min (when §1 signing is done), Save as *Draft*,
+   test on desktop + phone, then *Public*.
+5. Optional: `butler push release/last-lantern-web.zip <user>/last-lantern:html` from CI (`docs/store/itch-page.md`).
+
+### Owner steps: Steam Direct (about 2 hours of forms + Valve's waiting periods)
+1. partner.steamgames.com → join Steamworks, sign the distribution agreement, complete the **tax and bank
+   interviews** (identity verification can take days).
+2. Pay the **Steam Direct fee ($100 per app, recoupable after $1,000 gross)**. Valve then holds the app for a
+   30-day waiting period before release. Start this first.
+3. App admin → *Store page*: paste the copy from `docs/store/steam-page.md`, upload the graphical assets listed in its
+   asset table (all in `production/release/store-art/`), 10 screenshots, tags, system requirements, content survey
+   incl. the **AI-generated content disclosure** text.
+4. Submit the store page for review (3–5 business days), then press *Coming Soon* (≥ 2 weeks before launch;
+   our plan: ~4 months for wishlists).
+5. Builds: `npm run package:steam` → upload the `linux:dir` / `win:dir` / `mac:dir` folders as depots with SteamPipe
+   (`docs/store/steam-integration.md` §4). Set the launch options. Submit the build for review (3–5 business days).
+6. Achievements: create 24 with API names = the `ach_*` ids (`src/data/achievements.ts`).
+7. Pricing: **$4.99** with Valve's recommended regional prices, launch discount 20% for 7 days
+   (`docs/store/pricing-and-launch.md`). Release on a Tuesday/Thursday at 10:00 PT.
+
 ## 0. Business & legal (before the Coming Soon page)
 - [ ] **Name clearance for "Last Lantern"**: USPTO + EUIPO (classes 9, 41), Steam, itch.io, App Store / Google Play,
       domain + social handles. Alternates ready: *Lanternfall*, *Keep the Light*, *Gloomward*.
@@ -16,7 +67,7 @@
 - [ ] IARC rating questionnaire (expected PEGI 7 / ESRB E10+).
 - [ ] Privacy statement on the store page / website: "Last Lantern collects no personal data. Saves are stored
       locally." (true today: no telemetry, no network calls).
-- [ ] `CREDITS.md` + `THIRD_PARTY_NOTICES.txt` shipped in every build ✅ (package scripts add them automatically).
+- [x] `CREDITS.md` + `THIRD_PARTY_NOTICES.txt` shipped in every build ✅ (package scripts add them automatically).
 - [ ] Template credit: Claude Code Game Studios by Donchitos (MIT). The `LICENSE` file is kept in the repo ✅.
 
 ## 1. Build & platform

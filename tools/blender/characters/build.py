@@ -49,7 +49,7 @@ MODELS = {
 GLOW_HI = 150
 GLOW_LO = 56
 LO_BODY = 760
-GLOW_OVERRIDE = {'wisp': (260, 120), 'spitter': (170, 70), 'blob': (150, 64)}
+GLOW_OVERRIDE = {'wisp': (420, 160), 'spitter': (170, 70), 'blob': (150, 64), 'bloater': (320, 120)}
 BOSSES = {'stag', 'mire', 'king'}
 
 

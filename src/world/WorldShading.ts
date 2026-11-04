@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { rimUniforms } from '../render/materials';
 import { MASK_GLSL } from './GroundMask';
 
 /**
@@ -46,16 +47,21 @@ export const GLOOM_PARS = /* glsl */ `
     float gf = gloomFactor(wp);
     float g = gf * uGloomStrength * scale;
     float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
-    vec3 cool = mix(vec3(lum), col, 0.45) * vec3(0.5, 0.52, 0.9);
+    vec3 cool = mix(vec3(lum), col, 0.4) * vec3(0.44, 0.47, 0.88);
     col = mix(col, cool, g);
     // the Gloom itself: a violet haze that thickens away from the light, with brighter wisps at its edge
     float wisp = wNoise(wp.xz * 0.35 + vec2(uTime * 0.11, uTime * 0.07)) * wNoise(wp.xz * 0.9 - uTime * 0.08);
     float edge = gf * (1.0 - smoothstep(uLightR * 1.1, uLightR * 2.2 + 5.0, d));
     col += uGloom * (g * 0.07 + edge * wisp * 0.22 * uGloomStrength) * scale;
-    // warm, saturated lantern pool
-    float inside = 1.0 - smoothstep(uLightR * 0.2, uLightR * 0.95, d);
+    // warm lantern pool: amber light on green moss/grass multiplies out to yellow-lime, so inside the pool
+    // part of each colour is re-expressed as gold-amber of the same brightness (green → olive-gold, reds glow)
+    float inside = 1.0 - smoothstep(uLightR * 0.15, uLightR * 0.95, d);
     float l2 = dot(col, vec3(0.2126, 0.7152, 0.0722));
-    col = mix(col, max(vec3(0.0), mix(vec3(l2), col, 1.25)) * vec3(1.06, 1.0, 0.9), inside * scale);
+    vec3 sat = max(vec3(0.0), mix(vec3(l2), col, 1.12));
+    vec3 amber = vec3(l2) * vec3(1.78, 0.8, 0.3);
+    float greenish = saturate((col.g - max(col.r, col.b)) * 2.0 / max(l2, 1e-3));
+    vec3 warm = mix(sat, amber, 0.5 + 0.4 * greenish) * vec3(1.03, 0.97, 0.88);
+    col = mix(col, warm, inside * scale);
     return col;
   }
   float ditherIGN(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
@@ -70,7 +76,24 @@ export interface WorldPatchOptions {
   dither?: boolean;
   /** Gloom influence (glow parts use a small value so bioluminescence still reads in the dark). */
   gloom?: number;
+  /**
+   * Moonlit rim strength (lit materials only): a cool fresnel edge, favouring top edges, that grows OUTSIDE the
+   * lantern pool, so tree crowns / stones keep a readable silhouette against the dark field instead of reading
+   * as murky blobs. Tinted by the night's moon colour (rimUniforms.uRimTint). 0 = off.
+   */
+  rim?: number;
 }
+
+const RIM_FRAGMENT = /* glsl */ `
+  {
+    vec3 rimV = normalize(vViewPosition);
+    float rimF = pow(1.0 - saturate(dot(normal, rimV)), 2.2);
+    vec3 rimUpV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+    float rimUp = 0.35 + 0.65 * saturate(dot(normal, rimUpV) + 0.25);
+    float rimOut = 0.45 + 0.75 * gloomFactor(vGWorld);
+    outgoingLight += uRimTint * (rimF * rimUp * rimOut * WORLD_RIM);
+  }
+`;
 
 /** Vertex snippet: model-space sway for (instanced) props. Expects `transformed` and optional instanceMatrix. */
 const WIND_VERTEX = /* glsl */ `
@@ -119,10 +142,12 @@ export function patchWorldMaterial<T extends THREE.Material>(mat: T, opts: World
   const wind = opts.wind ?? 0;
   const gloom = opts.gloom ?? 1;
   const dither = !!opts.dither;
+  const rim = opts.rim ?? 0;
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, renderer) => {
     prev?.call(mat, shader, renderer);
     Object.assign(shader.uniforms, worldUniforms);
+    if (rim > 0) shader.uniforms.uRimTint = rimUniforms.uRimTint;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${GLOOM_PARS}\nvarying vec3 vGWorld;`)
       .replace(
@@ -132,14 +157,18 @@ export function patchWorldMaterial<T extends THREE.Material>(mat: T, opts: World
           : '') + `#include <project_vertex>\n${WORLD_POS_VERTEX}`,
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${GLOOM_PARS}\nvarying vec3 vGWorld;`)
+      .replace(
+        '#include <common>',
+        `#include <common>\n${GLOOM_PARS}\nvarying vec3 vGWorld;` +
+          (rim > 0 ? `\nuniform vec3 uRimTint;\n#define WORLD_RIM ${rim.toFixed(3)}` : ''),
+      )
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${dither ? DITHER_FRAGMENT : ''}`)
       .replace(
         '#include <opaque_fragment>',
-        `outgoingLight = applyGloom(outgoingLight, vGWorld, ${gloom.toFixed(3)});\n#include <opaque_fragment>`,
+        `outgoingLight = applyGloom(outgoingLight, vGWorld, ${gloom.toFixed(3)});\n${rim > 0 ? RIM_FRAGMENT : ''}#include <opaque_fragment>`,
       );
   };
-  const key = `world:${wind}:${gloom}:${dither}`;
+  const key = `world:${wind}:${gloom}:${dither}:${rim}`;
   const prevKey = mat.customProgramCacheKey.bind(mat);
   mat.customProgramCacheKey = () => prevKey() + key;
   return mat;

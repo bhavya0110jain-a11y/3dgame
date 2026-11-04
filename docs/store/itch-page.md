@@ -25,6 +25,15 @@
 | Community | Comments ON; devlog ON |
 | Custom noun | "vigil" (download button reads "Begin the vigil") |
 
+## Images (generated, see `docs/store/README.md`)
+| itch field | File (`production/release/store-art/…`) |
+|---|---|
+| Cover image (630×500, shown in browse grids) | `capsules/itch-cover-630x500.png` |
+| Screenshots (up to 5 in the sidebar) | `screens/02-horde.png`, `01-title.png`, `06-boss.png`, `08-evolution.png`, `04-night-marsh.png` |
+| Embed / social card | `capsules/og-image-1200x630.png` (also shipped as `og-image.png` next to `index.html`) |
+| Header banner (960×300 crop) | crop `capsules/steam-library-hero-1920x620.png` |
+| Gameplay GIF (devlog, page body) | `capture/gameplay.gif` |
+
 ## Page theme
 - Background `#120b2e` (night violet) with the page-background image from the press kit, 30% opacity.
 - Link / button colour `#ffb13a` (lantern amber). Text `#e9ecff`. Header: library hero art, cropped to 960×300.

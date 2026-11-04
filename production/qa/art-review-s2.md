@@ -1,145 +1,235 @@
-# Art Review — Sprint 2 (Art Director)
+# Art Review: Sprint 2 (uncommitted tree, 2026-11-04)
 
-**Status: PARTIAL — the required capture pass was NOT run.**
+**Reviewer:** art director (review only; no source edits)
+**Build:** working tree with all six sprint-2 agents' changes. `node tools/gen-model-manifest.mjs && vite build`, high tier forced, adaptive quality off, headless Chromium + SwiftShader.
+**Probe:** `/tmp/claude-0/-home-user-3dgame/eae0ed48-5b7a-5ab2-8a20-e8c9671eef35/scratchpad/ad-probe.mjs`
+**Shots:** `/tmp/claude-0/-home-user-3dgame/eae0ed48-5b7a-5ab2-8a20-e8c9671eef35/scratchpad/s2-ad-shots/*.png`. These are scratch files. QA should re-shoot into `production/qa/evidence/` after fixes.
+**Bar:** would this sit next to the best stylized indies on a Steam front page? The pillars I judged against are "Light vs Gloom readability" and "Juicy, legible chaos" (game-concept.md).
 
-This agent had no shell or process tool in this session (only file read/write/search), so it could not
-run `gen-model-manifest` / `vite build` or the Playwright probe. `scratchpad/s2-ad-shots/` does not exist.
-**Nothing below is a review of the integrated sprint-2 build.** This review uses the newest captures already
-in the scratchpad. Several are explicitly *pre-change* baselines (`s2-ui/base/*`, `s2-world-render/perf-before/*`)
-or come from sprint-1 QA runs (`qa-shots/*`, `biomes/*`, `final/*`). Treat every finding as "verify against the new
-build". Some may already be fixed by sprint 2, and sprint-2 regressions cannot be seen here.
+## Verdict: NOT SHIP-READY
 
-**Still to capture (blocking a real sign-off):** a probe run at 1280x720 covering menu, early gameplay per night
-(pines / marsh / ruins), a 250-enemy fight with 3+ evolved weapons, each boss (Stag / Mire / King), level-up,
-chest reveal, dawn, game over, and **gameplay** at 390x844 portrait. The only portrait capture so far is the pause menu.
+The menu, key art and every UI screen are at or near the bar. Gameplay frames are not. In 5 of the 11 gameplay frames you cannot find the bearer:
 
-Evidence used (all under `/tmp/claude-0/-home-user-3dgame/eae0ed48-5b7a-5ab2-8a20-e8c9671eef35/scratchpad/`):
-`qa-shots/playtest-2-904s.png`, `s2-world-render/perf-before/perf-high-300.png`, `final/boss.png`,
-`biomes/biome_ruins-play.png`, `biomes/biome_marsh-play.png`, `s2-ui/base/{menu,levelup,chest,dawn}.png`,
-`s2-characters/new3.png`, `qa/touch-portrait.png`.
+| Shot | Why the bearer can't be found |
+|---|---|
+| 03b | The model is stuck at the origin |
+| 03c, 04-pines | Hidden by pine crowns |
+| 05-horde-ruins, 05-horde-ruins-b | Whited out by evolved-weapon light |
+| 04-ruins | Red robe on a red pool |
 
-**Ship verdict on available evidence: NOT YET.** Static shots (menu, character models, boss silhouette) are near
-the bar. Moment-to-moment combat fails Pillar 1 (Light vs. Gloom readability) and Pillar 2 ("nothing is ever visually
-muddy") once the screen fills up. A store trailer recorded at minute 12 would show a white-orange blob.
+Late-game frames also break pillar 2. The screen goes to milky white, every boss renders as a pale ghost, and the screen fills with damage numbers. Fix the P0 items below before regenerating any store art.
+
+### Measured
+| Shot | Mean luma | Centre 40% of frame: share of pixels with luma > 0.85 |
+|---|---|---|
+| 03a pines start | 0.21 | 0.4% |
+| 04 pines / marsh / ruins early | 0.25 / 0.29 / 0.19 | 2.9% / 1.9% / 1.6% |
+| **05 horde pines (6 evolutions, 250 enemies)** | 0.46 | **46.6%** |
+| **05 horde pines-b** | 0.53 | **65.2%** |
+| 05 horde ruins-b (Dawnbreak pulse) | (visually full white) | bearer not visible |
+
+Sampled colours (average over a box):
+
+| Shot / region | Hex | Hue | Sat | Luma |
+|---|---|---|---|---|
+| Ruins ground outside the pool | #5c1239 | 328° | 0.80 | — |
+| Ruins lantern pool | #c74943 | 3° | — | — |
+| Ruins bearer (char_pyre) | #c97b75 | 4° | — | — |
+| Marsh water | — | — | — | **0.52** |
+| Marsh lantern pool | — | — | — | 0.50 |
+| Pines pool | — | 31–35° | — | 0.43–0.51 |
+| Pines outside the pool | — | 190–213° | — | 0.19–0.23 |
+
+- **Ruins:** the bearer's hue is 1° away from the pool's.
+- **Marsh:** the water is brighter than the lantern pool, so the value hierarchy is inverted.
+- **Pines:** the reference that works.
 
 ---
 
-## P0 — blocks shipping
+## P0: blocks ship / store art
 
-### P0-1 Late-game VFX whiteout: player and boss unreadable
-- **Where:** `qa-shots/playtest-2-904s.png`. About 60% of the frame centre is a saturated orange-to-white blowout from
-  stacked additive AoE / explosion VFX. The player cannot be located. The Hollow Stag (top-centre) shows only as a
-  ghost silhouette behind the glare.
-- **Owner:** `src/render/Fx.ts`, `src/render/vfx/*`, `src/render/post/PostPipeline.ts` (bloom `0.62, 0.55, 0.92`).
+### 1. The bearer model and lantern light never leave the origin (still unfixed)
+- **Evidence:** 03b. After 6 s of walking, `player.x = 15.72` but `group.position.x = 0.00`. The lantern pool sits at bottom-left and there is no bearer on screen.
+- **Status:** three agents reported this, and Player.ts was edited this sprint, but the sync is still missing (only `reset()` sets the position).
+- **Owner:** `src/entities/Player.ts`, `update()`.
+- **Fix:** add `this.group.position.set(this.x, 0, this.z);` just before `this.animate(dt, time, speed);`. This is the line eb9cca8 removed.
+- **Also:** add a vitest that calls update with moveX = 1 and asserts that `group.position.x === player.x`.
+- **Workaround in use:** every other shot in this review uses a probe-side copy of the sync.
+
+### 2. Pine and oak crowns hide the bearer
+- **Evidence:**
+  - 03c: walked into a grove; only a dithered smear of the bearer is left.
+  - 04-pines-early: the bearer is behind a pine at screen centre.
+  - 05-horde-pines: foreground crowns cover about 30% of the bottom-left.
+- **Why the current dither fails:**
+  - It only clears fragments 1.6–3.4 m from the camera→player line (`smoothstep(1.6, 3.4, dist)`).
+  - It never discards more than 80% (`fade * 0.8`).
+  - Pine crowns are 4–6 m wide, so the outer half of the crown stays solid.
+  - The 20% that remains is an IGN screen-door pattern that reads as noise.
+- **Fix, part 1 (owner `src/world/WorldShading.ts` DITHER_FRAGMENT):**
+  - Radius `smoothstep(2.8, 5.5, dist)`, scaled by camera zoom (pass `uOccR`).
+  - Full discard: `if (fade > bayer4x4(floor(gl_FragCoord.xy * 0.5)))`.
+  - Use a 4×4 ordered Bayer pattern at a 2-px cell instead of IGN, so the cut-away looks like a clean halftone instead of static.
+  - Lower the height gate to `smoothstep(0.4, 1.2, y)`, so low crowns fade too.
+- **Fix, part 2 (owner `src/entities/Player.ts` plus Renderer, characters agent):**
+  - Add a guaranteed x-ray silhouette.
+  - Draw the bearer's meshes a second time with `depthFunc = THREE.GreaterDepth`, `depthWrite = false`, flat colour `#ffd9a0` at opacity 0.55, and `renderOrder` 10.
+  - This shows the bearer wherever she is occluded (trees, walls, boss bodies), and it is the standard genre answer.
+- **Acceptance:** the bearer is identifiable in 100% of frames in a 15-minute Pines bot run.
+
+### 3. Late-game white-out (pillar 2)
+- **Evidence:**
+  - 05-horde-pines and pines-b: the centre 600×500 px is cream-white and enemies can't be read.
+  - 05-horde-ruins: a Beacon Ray / Eclipse starburst over a milky pastel veil.
+  - 05-horde-ruins-b: the Dawnbreak pulse whites out the frame and the bearer is invisible. The report said "centre flash is capped"; it is not, at max level with relics.
+- **Photosensitivity:** this is also a risk. It is a near-full-screen white flash that repeats on the Dawnbreak cooldown.
+- **Fixes (owners `src/render/Fx.ts`, `src/data/evolutions.ts`, `src/render/post/PostPipeline.ts` + `Renderer.ts`):**
+  1. **Governor (`Fx.ts` ~l.954):**
+     - Lower the floor from 0.6 to 0.3: `gainT = 1 - 0.7 * …`.
+     - Feed it the immediate-draw evolution visuals and ground FX coverage, not only particle pressure.
+     - Today the beams, rings and pools that cause the white-out are invisible to it.
+  2. **Focus protection:** every additive layer (particles, strips, ground FX, beams) gets `uFocus` (the player's xz) and multiplies its output by `mix(0.3, 1.0, smoothstep(1.2, 3.0, distToFocus))`. Fire pools already do this; generalise it.
+  3. **Dawnbreak (`evolutions.ts` / `Fx.dawnPulse`):**
+     - Peak additive intensity ≤ 0.5 inside 3 m.
+     - Ring width ≤ 1.2 m.
+     - No full-disc fill; keep the sun-rays as thin strokes.
+     - Under `reducedFlashing`, rings only.
+  4. **Bloom:** `UnrealBloomPass(…, 0.62, 0.55, 0.92)`. Drive strength with the governor gain, from 0.62 down to 0.35 at full load, and raise the threshold from 0.92 to 1.15 at full load.
+- **Acceptance:** with 6 maxed evolutions and 250 enemies, the centre region has ≤ 10% of pixels above 0.85 luma, and the bearer is visible in every frame of a 10 s capture.
+
+### 4. Bosses and hit enemies render as pale ghosts
+- **Evidence:**
+  - 06-boss-pines/marsh/ruins: the Hollow Stag, Mire Mother and Ashen King all read as cream/white silhouettes with no material identity.
+  - 11b-portrait: crawlers and wisps under fire are white.
+  - The release agent had to force `hitFlash = 0` for its store boss shot. This is the same issue the vfx agent raised.
+- **Cause:** `src/entities/enemyModels.ts` mixes albedo 60% toward near-white and adds 0.3 white emissive per unit of flash. `Enemies.ts:385` resets hitFlash to 1 on every hit, and it decays at only 6/s. Under Cinder Halo ticks a boss is effectively permanently white.
+- **Fix (characters agent):**
+  - Albedo mix 0.6 → 0.25.
+  - Move the flash to the rim: `totalEmissiveRadiance += vec3(1.0, 0.94, 0.85) * fxFlash * (0.12 + fxRim * 1.4)`.
+  - Decay `dt * 6` → `dt * 12`.
+  - Refractory: only re-trigger when `hitFlash < 0.3`.
+  - Multiply the flash by 0.35 for bosses and 0.6 for elites.
+  - Scale the flash by `1 - 0.5 * smoothstep(80, 200, flashingCount)` when many enemies flash at once.
+- **Acceptance:** a boss under Cinder Halo keeps its body hue in 9 of 10 sampled frames.
+
+---
+
+## P1: needed for the "top-tier stylized" bar
+
+### 5. The Ashen Ruins palette collapses into magenta-red
+- **Evidence:** 04-ruins-early and 06-boss-ruins.
+  - The ground outside the pool is hue 328°, sat 0.80. That is saturated magenta, not "violet plaza".
+  - The pool is hue 3°, which is red, not amber.
+  - The char_pyre bearer is hue 4°, so she is invisible on her own pool.
+  - Red ticks and magenta shades sit on magenta ground.
+  - Pillar 1 (warm pool vs cool world) does not read at all.
+- **Fix (owner `src/data/biomes.ts`, ruins entry; world-render):**
+
+| Field | Now | Proposed |
+|---|---|---|
+| moon | 0xd8b8ff | 0xa8b4ff |
+| renderAmbientSky | 0x8a6ab8 | 0x5e64a8 |
+| renderAmbientGround | 0x3a2a2a | 0x262838 |
+| renderGradeShadow | 0x3a2050 | 0x24224a |
+| renderGradeHighlight | 0xffc890 | 0xffd49a |
+| renderLantern | 0xffa040 | 0xffb45a |
+| gloom | 0x5a1f8a | 0x3f2a8a |
+| ground.base | 0x5a5264 | 0x4c4a5c |
+| ground.patch | 0x7a6a6c | 0x5e5a6e |
+| ground.path | 0x9a8a84 | 0x8a8494 |
+
+- **Targets:**
+  - Outside the pool: hue 235–265°, sat ≤ 0.45, luma 0.15–0.22.
+  - Pool: hue 30–40°.
+  - Also check WorldShading's gold-amber push for mauve/red inputs; it is landing at 3° here.
+
+### 6. Ruins props read as fire hazards
+- **Problem:** crystal props glow `0xff7a3a`, with flame-shaped orange spikes. Next to Brazier pools and enemy fire patches, the player can't tell decor from danger (04-ruins: four of them read as burning hazards).
+- **Fix:** crystal `glow` → `0xb08aff` (violet) or `0x7ad8ff`. Keep the orange for the ember particles only.
+- **Owner:** biomes.ts / Props.ts.
+
+### 7. Marsh value hierarchy is inverted, and spore bokeh covers the frame
+- **Evidence:** 04-marsh-early, 06-boss-marsh.
+  - The water is brighter (luma 0.52) than the lantern pool (0.50).
+  - The water has a high-frequency glitter that reads as noise.
+  - The `spore` ambient (count 120, 0xa8ffe8) draws as dozens of 20–30 px soft discs, which look like dirt on the lens.
+- **Fixes:**
+  - Water albedo and sparkle −40%, target luma ≤ 0.30.
+  - Sparkle density ×0.3.
+  - Spores 120 → 50, size ×0.4, alpha 0.35, and fade out within 4 m of the camera.
+- **Owner:** world-render (Ground/WorldShading water term, biomes ambient, `vfx/Particles` ambient sizing).
+
+### 8. Pines decor glows use enemy signal colours
+- **Evidence:** 03a, 03b, 04-pines, 06-boss-pines.
+  - Bush berries (`glow 0xff8ad0`) on dark round bushes look like pairs of eyes, so they read as lurking enemies.
+  - Mushrooms (`glow 0xa070f0`, sampled hue 259°) match the shade eyes (`0xb06cff`) and the jelly eyes (`0xff8af0`).
+- **Rule:** saturated violet, magenta and red emissives belong to enemies only. Decor glows are pale gold or cool cyan, with emissive ≤ 0.6.
+- **Fix:** pines bush glow → `0xffe2a0`, mushroom glow → `0x8fd0ff`, flower tint unchanged.
+- **Also (characters):** the Gloam Jelly body is pastel pink with a higher value than the ground and the bearer. It is the brightest object in 11b-portrait. Darken the body toward `0x4a2f7a` and keep the pink in the inner glow, bubbles and eyes, so it stays in the same family as the other gloom creatures (dark body, glowing features).
+
+### 9. World banners land on the bearer
+- **Evidence:** 04-pines, 04-marsh, 04-ruins, 05-horde.
+  - "An elite approaches…" and "The dark closes in!" render at screen centre, right over the player.
+  - In 05-horde two of them stack.
+- **Fix (owner Fx `fxt-big` text or UI):**
+  - Place banners at 20–24% of screen height, just under the dawn bar.
+  - 26–28 px, one at a time (queue), 1.2 s.
+  - Under 2 runs, a hint card replaces the banner instead of both showing.
+
+### 10. Damage-number clutter
+- **Evidence:** 05-horde-pines has about 45 numbers on screen ("105!", "210!", "53!"). The gold crit numbers share their hue with the gold evolution VFX, so neither reads. 04-pines has about 20 at 1:15.
+- **Fixes (owner `src/render/Fx.ts` numbers, plus a UI setting):**
+  - Merge hits per enemy per 0.25 s.
+  - Hard cap of 24 on screen, dropping non-crits first.
+  - Non-crits at 70% scale and 80% alpha.
+  - Crits in white with an amber outline, not gold fill.
+  - Suppress non-crits when more than 150 enemies are alive.
+  - Add a Settings option "Damage numbers: All / Crits only / Off".
+
+### 11. Grass reads as "TV static" inside the pool
+- **Evidence:** 03a. The amber pool is covered in short dark strokes.
+- **Cause:** `grass.root 0x24543f` is darker than `ground.base 0x356a48`, so from the top-down camera every blade draws a dark streak.
+- **Fix (`src/world/Grass.ts` / biomes):**
+  - Make the root colour equal to the ground colour under the blade: sample the groundMask base/patch in the vertex shader, or set the root to `ground.base`.
+  - Make the tip 25% lighter than the root.
+  - The pines pool then reads as soft gold fur instead of noise.
+- **Menu (01):** the foreground grass is flat straw-yellow triangles. It reads as low-poly and competes with the CTA. Darken the lower 60% of the menu grass (×0.55) and let the moon-sheen tip tone show.
+
+### 12. Portrait menu crops the bearer out
+- **Evidence:** 11a-portrait-menu. Only the lantern is visible, at x ≈ 10 px.
+- **Fix (owner `src/render/CameraRig.ts` `menu()`):** when `aspect < 1`, shift the look-at so the bearer lands at x ≈ 50%, y ≈ 58%, and pull the camera back about 1.4×. The menu buttons already occupy the lower 35%.
+
+### 13. Boss framing
+- **Evidence:** 06-boss-*. The boss enters from the top of the screen, and the boss bar (y ≈ 130–200 px) sits over the boss's head and antlers.
 - **Fix:**
-  1. Set a screen-energy budget for additive player FX. Scale each additive instance's intensity by
-     `1/sqrt(max(1, overlapCountInCell))` (the spatial hash already exists), or clamp FX fragment output to `min(rgb, 1.15)`
-     before bloom so stacks plateau instead of going white.
-  2. Add a dynamic bloom: strength `0.62 → 0.40` when active FX instances exceed 150, lerped over 0.5 s.
-  3. Draw a player "always-on-top" silhouette: after the scene, re-render the bearer with `depthTest:false` and a flat
-     `#ffd27a` fill at 35% alpha plus a 2 px dark `#1a0f2e` outline. Also keep a persistent ground ring under the player
-     (radius 1.1 m, `#ffd27a`, 2 px) that draws above FX.
-  4. Weapon AoE fills should be **rings and edges**, not filled discs: interior alpha ≤ 0.15, edge alpha 0.8.
-
-### P0-2 Tree canopies occlude the arena
-- **Where:** `playtest-2-904s.png`. Large dark-navy canopy blobs (left third, and centre-right next to the boss bar)
-  sit between the camera and the play space and cover about 25% of the frame.
-- **Owner:** `src/world/Props.ts`, `src/world/WorldShading.ts`.
-- **Fix:** add a screen-space dither fade on tall props. If a prop's screen position is within 35% of the screen height
-  of the player, or the prop is above the camera-to-player ray, fade it to 25% opacity with a Bayer-dither discard (no
-  transparency sort) over 0.25 s. Also lower the canopy height that can sit camera-side of the player. Cheapest
-  alternative: no tall trees spawn within 8 m on the camera side of the player's current chunk.
-
-### P0-3 Horde palette has no value hierarchy; enemies outshine the hero
-- **Where:** `s2-world-render/perf-before/perf-high-300.png`. With 300 enemies, every hue is present at full saturation
-  (magenta brutes, lime bogs, orange bloaters, purple shades, white knights). The player in the centre cannot be found.
-  Enemy bodies are brighter than the lantern pool.
-- **Owner:** enemy tints in `src/data/enemies.ts`, instanced enemy material in `src/entities/`, models from `tools/blender/`.
-- **Fix (palette rule for the art bible):**
-  - Enemy bodies: cool, mid-dark value, OKLCH L 0.35–0.55, chroma ≤ 0.12. Separate types by **silhouette and value
-    step**, not by full-spectrum hue. Only eyes and weak points are emissive.
-  - Warm amber/gold (hue 35–60°) is **reserved** for the player, the lantern, friendly projectiles, XP and pickups.
-  - Hostile projectiles and hazards: magenta/violet `#ff3df0` core with a dark `#2a0830` 1.5 px rim, so they never share
-    a hue with friendly fire.
-  - Elites get a rim/outline colour (`setRim` in `materials.ts`, e.g. `#ff6a3d`, strength 1.0), not a new body hue.
-  - Enemy rim strength in a horde: drop the default `0.6 → 0.35` once more than 120 enemies are on screen, so the
-    crowd reads as a mass and the hero's rim wins.
+  - Camera (Game.updateCamera / CameraRig): while a boss is within 14 m, bias the look-at 25% toward the boss and add +10% zoom-out.
+  - Optionally move the boss bar to the bottom centre, above the light gauge.
 
 ---
 
-## P1 — must fix before store capture
+## P2: polish
 
-### P1-1 Ruins night is monochrome violet
-- **Where:** `biomes/biome_ruins-play.png`. Floor, walls, gravestones, dead trees and sky all sit in one hue
-  (~270°) and a narrow value band. The only accents are two braziers. It reads as a colour filter, not lighting.
-- **Owner:** `src/data/biomes.ts` (ruins palette), `src/render/Lighting.ts`.
-- **Fix:** add a second, complementary moonlight hue. Hemisphere sky `#8fa3c8` (cool blue-grey) on stone tops, ground
-  bounce `#3a2450`. Raise floor albedo value about 15%. Add teal lichen/moss accents `#4fb3a0` on 20% of the stones.
-  Move the sky gradient toward `#2b1d52 → #6a4fa8` with the moon halo kept at its current colour.
-
-### P1-2 Marsh water glints read as noise
-- **Where:** `biomes/biome_marsh-play.png`, bottom half. Hundreds of square white glints over the water look like
-  square sprites, and they compete with XP gems for "bright small dot" meaning.
-- **Owner:** `src/world/Ambient.ts` / water shading in `src/world/Ground.ts`.
-- **Fix:** cut glint density to 30%, use round soft sprites (radial falloff, ≤ 4 px at 720p), tint `#9fe8ff` at
-  ≤ 0.6 intensity, and twinkle them (sin-phase alpha) so they read as reflections, not pickups.
-
-### P1-3 Lantern pool renders as a flat orange disc
-- **Where:** `final/boss.png`, centre. A hard-edged saturated orange disc (~100 px) sits under the player and reads as
-  a fire hazard. The player is about 25 px tall and half-covered by it.
-- **Owner:** lantern pool decal (`src/render/Fx.ts` or `src/render/Lighting.ts`).
-- **Fix:** use a radial gradient (alpha 0.35 at centre → 0 at r) in `#ffb347`. Let the real point light do the work,
-  and keep the gold ring (it reads well). Push the gameplay camera in 10–15% so the bearer is ≥ 40 px tall at 720p.
-- Positive: the Hollow Stag's silhouette, emissive antler tips and scale are on target. Add a soft contact shadow under
-  the boss to ground it.
-
-### P1-4 Chest reveal shows the same relic twice
-- **Where:** `s2-ui/base/chest.png`. "Swift Quill Lv1→2" and "Swift Quill Lv2→3" appear as two cards, which reads as a
-  bug. The reveal reuses the level-up sunburst and has no chest on screen.
-- **Owner:** `src/ui/UI.ts` (~line 1152), chest reward assembly in `src/game/`.
-- **Fix:** merge same-item rewards into one card "Lv 1 → 3" with 2 pips lighting up in sequence. Give the reveal its own
-  identity: chest icon centre-top, gold coin/ember burst, cards flipping in staggered (120 ms each, 0.92→1.04→1.0
-  scale), and a gold `#ffcc4d` sunburst instead of the white one.
-
-### P1-5 Dawn screen does not feel like dawn
-- **Where:** `s2-ui/base/dawn.png`. It uses the level-up template ("The master has fallen") over the same night-violet
-  backdrop. The HUD timer reads "DAWN?" (`src/ui/UI.ts:965`).
-- **Owner:** `src/ui/UI.ts`, `src/game/Game.ts:415`, grading in `PostPipeline.ts`.
-- **Fix:** this should be the game's one warm full-screen moment. Over 2.0 s, grade from the night LUT to a sunrise
-  (horizon `#ffb36b`, top `#ffd9a0`, exposure +0.3), dissolve remaining enemies to ash particles, then show the choice.
-  Change the timer text to "DAWN" (drop the "?") or show a sun icon.
-
-### P1-6 Level-up cards: dead space, badge clutter, generic mobile look
-- **Where:** `s2-ui/base/levelup.png`. About 40% of each card is empty below the description. There are three competing
-  badges per card (the "NEW!" sticker, the "NEW RELIC" tab and the number badge). The overall look is close to
-  Brawl-Stars/mobile-gacha, not "storybook".
-- **Owner:** `src/ui/UI.ts`, `src/ui/art.ts`.
-- **Fix:** card height −25% (content-fit). Drop the "NEW!" sticker when the tab already says NEW. Move the hotkey
-  number into the bottom edge. Add one storybook motif across all panels: an inner parchment-tone panel `#f3e6c8` at 8%
-  over the navy, a deckled/ink-line border (1.5 px `#e9c98a`), and small corner flourishes. Selected card: lift 8 px
-  plus a gold edge, not just glow.
+14. **Level-up and chest icons (UI):**
+    - Every weapon tile is the same orange square (07-levelup: Brazier, Hook and Lance are indistinguishable at a glance). Tint each tile from `def.color` (for example Spark Chain 0x9ad8ff, Rime 0x7ad8ff, Brazier 0xff5a1a).
+    - Sunspear Volley uses the same `bolt` glyph as Ember Bolt; evolved weapons need their own glyph or a crown overlay.
+    - Drop the redundant "NEW!" sticker; the "NEW WEAPON" ribbon already says it.
+15. **Evolution screen copy (08a/08b):** "Evolved" appears four times (title, ribbon caption, tag, description). Remove the `EVOLVED · ` prefix from the descriptions in `src/data/evolutions.ts`, and drop "Your weapon has evolved".
+16. **Modal scrim:** behind level-up, chest and dawn, world damage numbers and rings show through ("20!" at right in 08a–c). Raise the scrim to about 70% with a 6 px backdrop blur, or hide the FX text layer while `state === 'levelup'`.
+17. **Dawn (09):** the "Greet the Dawn" card is mauve-pink, close to the "Endless Night" card. Give it a warm gold gradient (`#ffd27a` → `#ff9a5a` → `#6a3a7a`) so the sun-versus-moon choice contrasts in hue, not just in border. The rising sun disc isn't visible at this moment; make sure it has cleared the hills by about 1.5 s.
+18. **Game over (10):** the "Damage by weapon" panel is 60% empty with two weapons. Size it to its content, or fill it with a light-over-time sparkline.
+19. **HUD at run start (03a):** 12 dashed empty slots read as a grid of holes. Show owned slots plus one empty slot per row until the row fills.
+20. **Bearer value:** in Pines the bearer is darker than the pool (luma 0.31 vs 0.51) and only about 45 px tall. Readable, but she is the smallest hero in the genre. Add the warm `#ffd9a0` rim from finding 2 at 0.35 even when unoccluded, so she pops on any ground.
 
 ---
 
-## P2 — polish
+## What already meets the bar (keep it)
+- **Menu (01):** strong composition. The bearer on the left third, the moon behind, the logo and the CTA stack are excellent. The logo is store-ready.
+- **UI system:** the Fredoka display type, chunky beveled buttons and gold/indigo palette are consistent across level-up, chest, dawn, game over and the first-run card. Portrait level-up (11c) stacks cleanly.
+- **Pines at the run start (03a):** amber pool against a blue night is exactly pillar 1.
+- **Enemy reads in Pines:** red/black crawler beetles and violet shades contrast well with the teal ground (06-boss-pines). The Ruins cobblestone path and the dead-tree silhouettes are good.
+- **Chest reveal:** the chest art (indigo, gold straps, moon clasp) and the rays are charming.
 
-- **P2-1 Bearer and enemy share pink.** The menu hero robe (`s2-ui/base/menu.png`) is the same magenta as the new
-  blob enemy (`s2-characters/new3.png`) and the brutes. Either move the bearer robe to deep ember red `#b8432f` with a
-  gold trim, or ban the 300–340° hue from enemy bodies. Owner: `tools/blender/` bearer and enemy scripts.
-- **P2-2 Menu foreground grass is overexposed.** The bottom-left quarter is near-white yellow from lantern light plus
-  bloom on near-camera grass. Clamp grass emissive/lantern contribution at camera distance < 3 m, or lower the menu
-  lantern intensity about 30%. Owner: `src/world/Grass.ts`, menu scene setup.
-- **P2-3 New enemy models (`s2-characters/new3.png`).** Blob eyes are faceted flat polygons, which contradicts
-  "smooth, rounded" (use a subdivided ellipse with a glossy highlight). The bloater carapace shows a doubled-shell offset
-  (two yellow rims), so merge the shells. The warden is on target.
-- **P2-4 HUD micro-type.** At 960x540 the "MAX" badges under the weapon icons are about 7 px. Set the minimum to 10 px
-  at 720p, or replace the text with a gold star pip.
-- **P2-5 Portrait.** Only the pause menu was captured at 390x844 (`qa/touch-portrait.png`). It fits and the hierarchy
-  is good. Portrait **gameplay** is unverified: weapon icon row width, boss bar and LIGHT bar overlap with the thumb zone.
-
-## Positives to protect
-- Menu composition: moon-backlit pines, a strong bearer silhouette, a clear CTA hierarchy (gold primary, violet
-  secondary).
-- Display typography (chunky rounded title with dark outline) is consistent across the menu and modals.
-- The LIGHT bar with the lantern icon is an excellent diegetic tie to the hook.
-- The boss silhouettes are strong.
+## Re-review checklist (QA / lead)
+1. Fix P0 items 1–4, rebuild, re-run this probe, and copy the shots to `production/qa/evidence/s2-art-*`.
+2. Re-measure the centre white-out (target ≤ 10%), the Ruins ground hue, and the marsh water/pool luma.
+3. Only then regenerate the store art (`tools/package-screens.mjs`); the current screens were captured with the bugs above masked by staging.

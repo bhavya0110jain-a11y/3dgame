@@ -54,15 +54,29 @@ const tmpCol = new THREE.Color();
 const tmpHsl = { h: 0, s: 0, l: 0 };
 
 /** The lantern hangs ~0.5 m from the bearer: soft-compress direct light on the bearer's own materials so
- *  the hero is warmly lit instead of blown out, while keeping hue and form shading. */
+ *  the hero is warmly lit instead of blown out, and partly desaturate that light so the robe keeps its dyed
+ *  colour (an amber key multiplied into a violet robe reads pink, into an indigo one muddy brown). A cool
+ *  moonlit fresnel rim separates the silhouette from the warm lantern-lit grass. */
 function softenDirectLight(mat: THREE.MeshStandardMaterial): void {
   mat.onBeforeCompile = (sh) => {
-    sh.fragmentShader = sh.fragmentShader.replace(
-      '#include <lights_fragment_end>',
-      `#include <lights_fragment_end>
-      reflectedLight.directDiffuse = reflectedLight.directDiffuse / (1.0 + reflectedLight.directDiffuse * 1.6);
-      reflectedLight.directSpecular = reflectedLight.directSpecular / (1.0 + reflectedLight.directSpecular * 1.6);`,
-    );
+    sh.fragmentShader = sh.fragmentShader
+      .replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+      // work on the incoming light (divide the albedo back out) so only the LIGHT is desaturated, never the cloth
+      vec3 bAlb = max(diffuseColor.rgb, vec3(0.02));
+      vec3 bL = reflectedLight.directDiffuse / bAlb;
+      bL = mix(bL, vec3(dot(bL, vec3(0.3, 0.55, 0.15))) * vec3(1.08, 0.98, 0.86), 0.55);
+      reflectedLight.directDiffuse = bAlb * bL / (1.0 + bL * 0.9);
+      // the lantern sits ~0.5 m away: its broad specular lobe would otherwise wash the cloth grey-amber
+      reflectedLight.directSpecular = reflectedLight.directSpecular * 0.5 / (1.0 + reflectedLight.directSpecular * 3.0);`,
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+      float bRim = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 3.0);
+      totalEmissiveRadiance += diffuseColor.rgb * vec3(0.45, 0.6, 1.25) * bRim * 0.55;`,
+      );
   };
   mat.customProgramCacheKey = () => 'bearer-soft-light';
 }
@@ -111,6 +125,7 @@ export class Player {
     this.rig = bearerScene ? this.buildFromGlb(bearerScene) : this.buildProcedural();
     this.lantern = this.rig.glass;
     this.mountRig();
+    this.setRobeColor(this.robeHex); // the GLB's authored robe colour is only a placeholder
     this.group.add(this.body);
     scene.add(this.group);
     if (!bearerScene) {
@@ -321,9 +336,21 @@ export class Player {
   setRobeColor(hex: number): void {
     this.robeHex = hex;
     tmpCol.setHex(hex).getHSL(tmpHsl);
-    const l = Math.min(0.42, Math.max(0.28, tmpHsl.l * 1.1 + 0.1));
-    const s = Math.min(0.9, tmpHsl.s * 1.8 + 0.25);
-    tmpCol.setHSL(tmpHsl.h, s, l);
+    // The lantern + its bloom wash the bearer in amber: a violet robe multiplies out to pink and a dull indigo
+    // to tan. Cool hues are pulled towards a deep azure-indigo and saturated hard so, once warmed, they read
+    // as rich storybook blue-violet cloth; warm hues (rust, crimson) survive amber light and keep the old lift.
+    let h = tmpHsl.h;
+    let s: number;
+    let l: number;
+    if (h > 0.5 && h < 0.97) {
+      if (h > 0.66) h = 0.63 + (h - 0.66) * 0.1;
+      s = Math.min(0.8, tmpHsl.s * 1.8 + 0.35);
+      l = Math.min(0.44, Math.max(0.34, tmpHsl.l * 1.1 + 0.12));
+    } else {
+      s = Math.min(0.8, tmpHsl.s * 1.8 + 0.25);
+      l = Math.min(0.42, Math.max(0.28, tmpHsl.l * 1.1 + 0.1));
+    }
+    tmpCol.setHSL(h, s, l);
     for (const m of this.rig.robeMats) m.color.copy(tmpCol);
     for (const m of this.rig.capeMats) m.color.copy(tmpCol).multiplyScalar(0.82);
   }
@@ -422,6 +449,7 @@ export class Player {
     if (this.invuln > 0) this.invuln -= dt;
     if (!this.dead && stats.lightRegen > 0) this.heal(stats.lightRegen * dt, ctx);
 
+    this.group.position.set(this.x, 0, this.z);
     this.animate(dt, time, speed);
 
     const frac = this.lightFrac(stats.maxLight);

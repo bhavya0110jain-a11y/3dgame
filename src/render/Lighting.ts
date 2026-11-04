@@ -2,12 +2,38 @@ import * as THREE from 'three';
 import type { BiomeDef } from '../data/biomes';
 
 /**
- * Render layer of the lantern's cube-shadow casters. The lantern PointLight's shadow camera sees ONLY this layer,
- * so the 6 cube faces never redraw the horde, the bearer, grass or far props. World puts cheap proxy copies of
- * the few solid props within the lantern's reach on this layer (Props.updateView); nothing else is on it, and the
- * main camera / moon shadow camera never see it (they stay on layer 0).
+ * Lantern shadow gate. The bearer's PointLight renders 6 cube faces; letting the horde, the bearer, grass and every
+ * streamed prop into those faces cost ~4 M triangles/frame at 350 enemies. (three r170's WebGLShadowMap tests
+ * object layers against the MAIN camera, so layers cannot separate the two shadow maps.) Instead every Mesh gets
+ * an onBeforeShadow/onAfterShadow pair that skips the draw (drawRange.count = -1 → renderBufferDirect returns
+ * before issuing it) unless the mesh belongs to the pass:
+ *   lantern cube faces  → only meshes with `userData.lanternCaster === true` (World's near-prop proxies)
+ *   moon / other lights → everything that casts shadows EXCEPT lantern casters
+ * Meshes that install their own onBeforeShadow simply opt out of the gate (they cast into both).
  */
-export const LANTERN_SHADOW_LAYER = 2;
+const gate = {
+  cam: null as THREE.Camera | null,
+  geo: null as THREE.BufferGeometry | null,
+  count: 0,
+};
+
+function installShadowGate(): void {
+  const proto = THREE.Mesh.prototype as THREE.Mesh;
+  if ((proto as unknown as { __llGate?: boolean }).__llGate) return;
+  (proto as unknown as { __llGate?: boolean }).__llGate = true;
+  proto.onBeforeShadow = function (this: THREE.Object3D, _r, object, _c, shadowCamera, geometry) {
+    const lanternPass = shadowCamera === gate.cam;
+    if (lanternPass === (object.userData.lanternCaster === true)) return;
+    gate.geo = geometry;
+    gate.count = geometry.drawRange.count;
+    geometry.drawRange.count = -1;
+  };
+  proto.onAfterShadow = function (this: THREE.Object3D, _r, _o, _c, _s, geometry) {
+    if (gate.geo !== geometry) return;
+    geometry.drawRange.count = gate.count;
+    gate.geo = null;
+  };
+}
 
 export interface LightingQuality {
   /** Moon shadow map size; 0 disables moon shadows. */
@@ -29,8 +55,8 @@ const KEY_AZIMUTH = new THREE.Vector2(-0.72, -0.69).normalize();
  *  - moon: DirectionalLight key with soft PCF shadows; its shadow frustum is tight around the camera's focus and
  *    texel-snapped so shadows stay crisp near the action and never shimmer while the camera glides
  *  - hemi: sky/ground fill tuned per biome (BiomeDef.renderAmbient* hints, else derived from the moon)
- *  - lantern: optional cube shadows on the bearer's PointLight (high tier only), restricted to
- *    LANTERN_SHADOW_LAYER (near-prop proxies) so the cost is a few dozen props x 6 faces, independent of the horde
+ *  - lantern: optional cube shadows on the bearer's PointLight (high tier only), restricted by the shadow gate to
+ *    World's near-prop proxies, so the cost is a few dozen props x 6 faces, independent of the horde
  * Owned by Renderer; Game calls renderer.applyBiome(...) and lighting.follow(...) each frame.
  */
 export class Lighting {
@@ -86,15 +112,17 @@ export class Lighting {
     this.moon.intensity = this.moonBase * s;
   }
 
-  /** Registers the bearer's lantern light (cube shadows on high). Only LANTERN_SHADOW_LAYER objects cast into it, so
-   *  the bearer (`_owner`, kept for API compatibility) never throws a wedge of its own shadow over the field. */
+  /** Registers the bearer's lantern light (cube shadows on high). Only `userData.lanternCaster` meshes cast into it
+   *  (see the shadow gate), so the bearer (`_owner`, kept for API compatibility) never throws a wedge of its own
+   *  shadow over the field and the horde never enters the 6 cube faces. */
   attachLantern(light: THREE.PointLight, _owner?: THREE.Object3D): void {
     this.lantern = light;
     const sh = light.shadow;
     sh.bias = -0.003;
     sh.normalBias = 0.04;
     sh.camera.near = 0.25;
-    sh.camera.layers.set(LANTERN_SHADOW_LAYER);
+    installShadowGate();
+    gate.cam = sh.camera;
     sh.radius = 3;
     this.applyQuality();
   }

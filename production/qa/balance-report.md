@@ -86,6 +86,46 @@ boss fight. Level pacing is on target: about 5–6 level-ups in the first minute
   the camera and the player.
 - Achievement toasts appear at the bottom center, over the action around the player. Consider top-center or a side position.
 
+## Sprint 2 — before / after (gameplay agent)
+
+**What changed** (details + formulas: `design/gdd/director.md`, `design/gdd/progression.md`):
+- **Early game gentler**: `damageScale` 1 + 0.055m → 1 + 0.04m (+0.08/min after 6:00); `hpScale` early slope 0.16 → 0.15.
+  Crawler dmg 7 → 6, stalker 12 → 10, jellyling 4 → 3 (speed 3.6 → 3.4), brute 16 → 13 (#2, #5).
+- **De-stacked spikes**: first swarm (2:30) is shades/wisps only and 24 strong (#3); swarm cadence 180 → 210 s
+  (2nd swarm at 6:00); rush from 3:50; 5:00–7:00 phase 5.5/s·180 → 5.2/s·165 with brute weight 0.5; **no elite Brute/Knight
+  before 5:00** (an elite brute at 2:55 killed bot run 3 of the first pass).
+- **Mid-late pushes back** (#1): late HP ramp `× (1 + 2.5·L²)` from 7:00 (hpScale 5.4 → 18.5 at 15:00) and **adaptive pressure**
+  from 6:00: when the arena is starved (alive < 30 % of cap) *and* light ≥ 70 %, spawn rate climbs to ×2.4 (+50 % hp per
+  point); it relaxes when the arena fills or light drops below 40 %.
+- **Boss is a test, not a cliff** (#1): damage scaling capped at ×1.3 during the fight (Stag contact 55 → 39), **lantern flares**
+  to full light + knocks the horde back on arrival (`lantern:flare`), boss HP ×1.5 (fights last 50–150 s, not 40–60).
+- **Reliquaries drift** to the bearer after 4 s on the ground (#4): chests opened went from 0/7 (S1 run 5) to 9/9, 9/9, 9/9, 7/7.
+- Economy: run Ash `kills/20 → kills/40` (pressure raised kill counts); shared `ashForRun()` in `RunState.ts`.
+- Outliers trimmed: Tempest Choir jumps 12 → 9, Glacier Heart shatter 30 → 22.
+
+**Browser bot, fresh save, Whispering Pines** (`tools/playtest-bot.mjs --meta none --substeps 4`, skill 0.8). Three passes
+while tuning; **pass C is the shipped tuning**.
+
+| Pass | Tuning | Outcomes (time) | Notes |
+|---|---|---|---|
+| S1 (QA) | Sprint 1 | 5:59 · 15:42 (boss) · 2:39 | 0/3 dawn; 2:39 = jelly swarm; boss cliff |
+| A | pressure ×2.6 from 6:00, no light gate | 7:26 · 4:34 · 4:20 · 7:19 | too harsh: pressure kicked in on average builds at 6:00 |
+| B | pressure ×2.2 from 7:00, light-gated, stalker 10, light elites | 16:44 (boss) · 2:10 · **16:50 victory** · 15:46 (boss) | too generous for a first run |
+| **C** | pressure ×2.4 from 6:00, rise 0.04/s, light-gated | 13:08 · 7:34 · 13:00 · 8:54 (mean 10:39, 0/4 dawn) | light dips to 23–82 % in 8–15 min |
+
+**Headless sim** (`tools/balance-sim.ts`, 10 seeds, skill 0.8, shipped tuning): fresh save median ≈ 9:30, mean 11:17
+(6:21 … 18:00), 1/10 boss kills. Half Hearth (≈ 2.2k Ash, ~4–5 runs): 1–2/5 wins. Full Hearth: 3/3 wins, boss TTK 46–125 s,
+damage taken 70–530. Sprint 1 sim for comparison: fresh 5:07–9:20 (0/4), full 3/3 with boss TTK 57–65 s.
+
+**Reading it.** The first-run experience now ends mostly between 7 and 13 minutes for a decent bot — no more 2–4 minute
+deaths from a stacked swarm or a 2:55 elite brute — and a first-try victory is rare. Light now dips and recovers in the
+8–15 min window (min light 23 % in pass C run 11) instead of reading 100 % flat. A real first-time player is weaker than the
+bot, which puts them close to the 6–9 min target. **Top remaining harshness source: contact-damage cadence.** One enemy
+overlapping the bearer hits every 0.35 s (Player invuln), so a single elite stalker did 99 damage in 7 hits in 2 s (pass B
+run 6, death at 2:10) and brutes did 500–836 damage per long run in 23–33 hits. A per-enemy contact cooldown (~0.8 s) in
+`Enemies.ts` or a longer post-hit invulnerability in `Player.ts` would remove the last spike; requested from those owners.
+Tuning knobs if human playtests disagree: `PRESSURE_*`, `LATE_HP`, `LATE_FROM`, `damageScale` in `src/game/Director.ts`.
+
 ## How to re-run
 ```bash
 node tools/gen-model-manifest.mjs && npx vite build --outDir /tmp/build

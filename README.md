@@ -34,7 +34,8 @@ node tools/perf.mjs --counts 100,200,350   # frame-time benchmark at several ene
 node tools/playtest-bot.mjs --runs 3       # autonomous playtest bot, full runs
 ```
 `DIST=<dir>` points the smoke test at another build folder. CI (`.github/workflows/game-ci.yml`) runs typecheck,
-tests, the build and the smoke test on every push.
+tests, the build and the itch-zip checks on every push and PR, then the browser smoke test and the itch sub-folder
+boot check (perf is advisory).
 
 ## Ship
 
@@ -45,7 +46,7 @@ tests, the build and the smoke test on every push.
 | `node tools/package-desktop.mjs --build linux:AppImage linux:tar.gz` | installers in `release/desktop/` | itch.io / direct download. Windows (`win:nsis`, `win:zip`) and macOS (`mac:dmg`) build on their own OS. See the CI template in `production/release/ci/release-desktop.yml` |
 | `npm run package:steam` | same, with `steamworks.js` bundled | Steam achievements (optional, see `docs/store/steam-integration.md`) |
 | `npm run package:icons` | `electron/assets/icon.{png,ico}`, `icons/*.png` | regenerate the app icon from `electron/assets/icon.svg` |
-| `node tools/package-screens.mjs release/screens [--clean]` | 10 store screenshots at 1920×1080 | the screenshot plan in `docs/store/press-kit.md` §6 |
+| `node tools/package-screens.mjs [--video]` | `production/release/store-art/`: 10 HUD screenshots, clean plates, 17 composed capsules (Steam, itch, OG, logo), gameplay mp4/webm/gif | store art captured **in-engine** and composed with the real logo. Re-run after visual changes (`docs/store/README.md`) |
 
 Every package includes `THIRD_PARTY_NOTICES.txt` and `CREDITS.md`. `release/` is gitignored.
 

@@ -11,6 +11,7 @@ import { PF_FLICKER, PF_SOFTFADE } from './Particles';
  */
 const X = 0, Z = 1, R = 2, AGE = 3, LIFE = 4, SEED = 5, ACC = 6;
 const F = 7;
+const CLEAR2 = 1.5 * 1.5;
 
 export class FirePools {
   private d: Float32Array;
@@ -33,26 +34,31 @@ export class FirePools {
     geo.instanceCount = 0;
     this.geo = geo;
     this.mat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 } },
+      uniforms: { uTime: { value: 0 }, uFocus: { value: new THREE.Vector2(1e9, 1e9) }, uGain: { value: 1 } },
       vertexShader: /* glsl */ `
         attribute vec4 iA;
         attribute vec2 iB;
         varying vec2 vUv;
         varying vec4 vA;
         varying vec2 vB;
+        varying vec2 vW;
         void main() {
           vUv = position.xz;
           vA = iA;
           vB = iB;
           vec3 p = vec3(iA.x + position.x * iA.z, 0.05, iA.y + position.z * iA.z);
+          vW = p.xz;
           gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
         uniform float uTime;
+        uniform vec2 uFocus;
+        uniform float uGain;
         varying vec2 vUv;
         varying vec4 vA;
         varying vec2 vB;
+        varying vec2 vW;
         float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
         float vn(vec2 p) {
           vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
@@ -79,8 +85,11 @@ export class FirePools {
           vec3 c = vec3(0.55, 0.05, 0.02) * smoothstep(0.05, 0.3, heat);
           c = mix(c, vec3(1.0, 0.32, 0.04), smoothstep(0.3, 0.55, heat));
           c = mix(c, vec3(1.0, 0.72, 0.18), smoothstep(0.55, 0.8, heat));
-          c = mix(c, vec3(1.0, 0.92, 0.7), smoothstep(1.0, 1.3, heat));
-          float inten = smoothstep(0.04, 0.35, heat) * (0.75 + heat * 1.1);
+          c = mix(c, vec3(1.0, 0.86, 0.55), smoothstep(1.05, 1.4, heat));
+          float inten = smoothstep(0.04, 0.35, heat) * (0.6 + heat * 0.75);
+          // the bearer stands in a calmer pocket of embers, so the hero never dissolves into a white-hot pool
+          float fd = length(vW - uFocus);
+          inten *= mix(0.35, 1.0, smoothstep(0.7, 2.0, fd)) * uGain;
           // scorched, smouldering rim darkens the ground just outside the flames
           float rim = smoothstep(0.55, 0.9, d) * (1.0 - smoothstep(0.95, 1.15, d));
           float dark = rim * 0.45 * vB.x + edge * 0.25 * vB.x;
@@ -110,6 +119,11 @@ export class FirePools {
   }
 
   private aB: THREE.InstancedBufferAttribute;
+  /** Player position (FxManager.setFocus): no tall flame licks or smoke within CLEAR m of it, so the hero stays visible. */
+  focusX = 1e9;
+  focusZ = 1e9;
+  /** Brightness governor (see FxManager). Also scales down when many pools overlap. */
+  gain = 1;
 
   add(x: number, z: number, r: number, life: number): void {
     if (this.count >= this.capacity) {
@@ -130,6 +144,9 @@ export class FirePools {
   update(dt: number, ps: ParticleSystem): void {
     this.time += dt;
     this.mat.uniforms.uTime.value = this.time;
+    (this.mat.uniforms.uFocus.value as THREE.Vector2).set(this.focusX, this.focusZ);
+    // many overlapping pools add up to white: dim each pool a little as the field fills
+    this.mat.uniforms.uGain.value = this.gain / (1 + Math.max(0, this.count - 3) * 0.06);
     const d = this.d;
     const A = this.aA.array as Float32Array;
     const B = this.aB.array as Float32Array;
@@ -160,7 +177,9 @@ export class FirePools {
           const a = ps.rand() * Math.PI * 2;
           const rr = Math.sqrt(ps.rand()) * r * 0.8;
           const px = x + Math.cos(a) * rr, pz = z + Math.sin(a) * rr;
-          const roll = ps.rand();
+          let roll = ps.rand();
+          const fdx = px - this.focusX, fdz = pz - this.focusZ;
+          if (fdx * fdx + fdz * fdz < CLEAR2) roll = 0.62 + roll * 0.28; // only low embers around the player
           if (roll < 0.62) {
             const s = 0.55 + ps.rand() * 0.6 * (1 - rr / r);
             ps.emit(px, 0.25 + s * 0.4, pz, 0, 1.6 + ps.rand() * 1.4, 0, 0.35 + ps.rand() * 0.3, s, s * 0.3, 0xffd27a, 0xff3a0a, 1.6, Frame.FLAME, 1, 0.5, 0.5, 0, PF_FLICKER, (ps.rand() - 0.5) * 0.4, 0, 0, 0.12);

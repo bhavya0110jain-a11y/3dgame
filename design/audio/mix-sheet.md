@@ -55,8 +55,19 @@ Renderer: `tools/audio/` (numpy/scipy, all original synthesis, nothing sampled o
 - The AudioContext runs at 48 kHz, the same rate as the assets.
 - Seam discontinuity is under 0.3× the typical sample-to-sample delta (`seam` column, section 5).
 
-**Paused, level-up and chest screens.** No `setIntensity` call for more than 500 ms means gameplay is frozen.
-The music then goes through a 750 Hz low-pass at −4.4 dB. Unpausing restores it.
+**Paused, level-up and chest screens.** The music goes through a 750 Hz low-pass at −4.4 dB while gameplay is
+frozen. The pause state comes from `audio.attach(events, isPaused)` (polled at 10 Hz) or `audio.setPaused(bool)`;
+until Game calls one of them the audio layer attaches itself to `window.__game` (state `paused`/`levelup`). Only
+with neither available does it fall back to "no `setIntensity` call for 1.5 s" (was 0.5 s: slow machines misfired).
+
+**Memory (Sprint 2).** Decoded PCM is float32, so a 36 s stereo cue at 48 kHz is ~14 MB. Policy:
+- Music decodes at 32 kHz (`MUSIC_RATE`) and ambience at 24 kHz (`AMB_RATE`) through an `OfflineAudioContext`
+  (`decodeAudioData` always resamples to its context's rate). SFX stay at 48 kHz (short, mostly mono).
+- Only the playing cue is decoded: the boss theme on `boss:warning` / `boss:spawned` (the roar's duck covers the
+  ~0.2 s decode), run stems are released 2.5 s into the boss fight and re-decoded from the cached Ogg bytes when it
+  ends, menu ↔ run release each other, stingers decode on demand and are released after playing.
+- Budget: run ≈ 36 MB stems + 4.6 MB ambience + 16.7 MB SFX ≈ 58 MB (was ≈ 98 MB with boss + stingers + 48 kHz).
+  `audio.decodedMB` reports the live figure. A hidden tab suspends the context.
 
 ## 3. Bus structure and gain staging
 ```
@@ -196,6 +207,10 @@ DIST=<build dir> node tools/audio/verify.mjs                                    
 - `audio.startMusic('menu'|'run'|'boss')`, `audio.stopMusic()`, and `audio.bossDefeated()`.
 - `audio.setIntensity(0..1)`: call it every gameplay frame. It is also the pause detector.
 - `audio.setLight(0..1)`: call it every gameplay frame. It drives the low-light warning.
-- Available but not yet wired to any caller:
-  - UI: `confirm`, `back`, `deny`
-  - Director: `elite` (elite spawn) and `warn` (swarm warning)
+- `audio.attach(events, isPaused?)`: the audio layer's own event subscriptions (call once from Game):
+  - `elite:spawned` → `elite`; `achievement:unlocked` → soft `confirm` chime
+  - `boss:warning` (requested from the Director, ~20 s before the boss) → `warn` + boss theme pre-decode
+  - `boss:spawned` → boss theme decode; `run:ended` → release run/boss PCM
+- `audio.setPaused(bool)`: explicit pause muffle (alternative to the `isPaused` getter).
+- Game already triggers: kills, hits, crits, hurt, heal, pickups, weapon fire, evolve, boss roar/enrage/death,
+  level-up, chest, victory/defeat stingers. UI uses `hover`, `click`, `confirm`, `back`, `deny`.

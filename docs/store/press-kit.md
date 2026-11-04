@@ -70,35 +70,40 @@ polished, sellable indie game look like when an AI studio builds it under human 
   violet fog behind her come a ring of shade silhouettes with glowing eyes and the antlered silhouette of the
   Hollow Stag. A huge pale moon sits upper-left. Palette: `#120b2e` night, `#2b1a78` violet, `#0f6e86` teal,
   `#ffb13a` lantern amber, `#ffe7a0` highlight.
-- **Production:** pose the GLB models in Blender (`public/models/characters/bearer.glb`,
-  `public/models/enemies/*.glb`) and render with EEVEE, using a clean-plate capture (`--clean`) as a reference.
-  Do not paint over other games' assets or styles.
+- **Production (done, re-runnable):** `node tools/package-screens.mjs` renders the key-art plate **in the engine**
+  (the title screen's low hero camera, mid-vigil, ~220 shadows advancing out of the fog under the moon) and composes
+  every capsule with the shipping logo markup and fonts. Output: `production/release/store-art/capsules/`
+  (`key-art-1920x1080.png`, `logo-1280x720.png` transparent, all Steam/itch sizes). See `docs/store/README.md`.
+- **Optional upgrade:** a painted or Blender-posed 4K master (EEVEE render of `public/models/characters/bearer.glb` +
+  `public/models/enemies/*.glb`, using `plates/keyart.png` as the layout reference). Do not paint over other games'
+  assets or styles.
 
 ## 6. Screenshot plan (exact in-game moments)
 
-Capture at **1920×1080, High preset, HUD on** (Steam requires real gameplay) with
-`node tools/package-screens.mjs release/screens`, and add `--clean` for key-art plates. The script reproduces each
-moment through the debug hooks. When a shot needs human timing, grab it by hand on a real GPU.
+Captured at **1920×1080, High preset, HUD on** (Steam requires real gameplay) by `node tools/package-screens.mjs`
+into `production/release/store-art/screens/`. The same moments without UI go to `plates/`. Each moment is staged
+through the debug hooks from a seeded run, so a re-run reproduces it (see `docs/store/README.md`). On a real GPU
+the whole set takes a few minutes; re-shoot after every visual change.
 
 | # | File | Moment | Why it sells |
 |---|---|---|---|
-| 1 | `01-title` | Title screen, menu hero shot: bearer in the grass, moon behind the pines | Brand + art style in one frame |
-| 2 | `02-first-minute-pines` | Whispering Pines ~0:40: first enemies entering the lantern pool, 2 weapons | Readability, the light-pool hook |
-| 3 | `03-swarm-300` | Pines ~1:30 with Cinder Halo + Spark Chain + Flare Nova + Lighthouse Beam, 300 enemies in a ring | **Hero shot.** "Hundreds of shadows, never muddy" |
-| 4 | `04-gloom-closing-in` | Light at 18%: the pool has shrunk and the violet Gloom presses in, 120 enemies | **The hook**, health as radius |
-| 5 | `05-level-up-choice` | First level-up overlay with 3 cards | Build-crafting, UI polish |
-| 6 | `06-boss-hollow-stag` | Hollow Stag entering 8 m in front, Spark Chain arcing, small wisp escort | Boss scale and spectacle |
-| 7 | `07-sunken-marsh` | Marsh ~0:40: reflective pools, Gloam Jellies splitting, Rime Shards + Moth Lantern | Biome variety (teal/cyan palette) |
-| 8 | `08-ashen-ruins-king` | Ruins with ember cracks, the Ashen King + knights, Brazier fire + Vesper Bell toll | Late game, warm-on-dark contrast |
-| 9 | `09-hearth` | The Hearth with ~2,400 Ash and several ranks affordable | Meta progression, "one more run" |
-| 10 | `10-victory` | "Dawn" victory screen with Ash payout and unlocks | Reward, goals |
+| 1 | `01-title` | Title screen: Wren in the grass of the glade, the moon behind the pines, the menu | Brand + art style in one frame |
+| 2 | `02-horde` | Whispering Pines, level 34, ~300 shadows against Solar Crown + Tempest Choir + Pyre Garden + Lunar Monarchs (all evolved) | **Hero shot.** Hundreds of shadows, absurd builds |
+| 3 | `03-night-pines` | Isolde (Storm Seer) at 3:20: Spark Chain arcing, Wick Lance, Brazier fires, damage numbers on | The everyday fight, readable |
+| 4 | `04-night-marsh` | Maelis (Rime Pilgrim) in the Sunken Marsh: Rime Shards ring, Moth Lantern, Glacier Heart, Gloam Jellies | Biome variety (teal palette) |
+| 5 | `05-night-ruins` | Brannoc (Pyre Monk) on the Ashen Ruins flagstones: Brazier + Cinder Halo vs. knights and Cinder Ticks | Late game, warm-on-dark |
+| 6 | `06-boss` | Osric (Warden) and the Hollow Stag with its boss bar, a wisp escort | Boss scale |
+| 7 | `07-levelup` | A level-up with three cards (relic / new weapon / new weapon), reroll-banish-skip | Build-crafting, UI polish |
+| 8 | `08-evolution` | Reliquary reveal: **Ember Bolt → Sunspear Volley** evolution banner | The "whoa" moment |
+| 9 | `09-bearers` | Vigil setup: six bearers and three nights | Content breadth |
+| 10 | `10-hearth` | The Hearth with 2,140 Ash and 13 upgrades | Meta progression, "one more run" |
 
-**Capture by hand on a real GPU (motion):** an evolution reveal in a reliquary (Solar Crown), the Vesper Bell
-toll on a 50-enemy pack, a 15:00 boss-arrival camera pull-back, and the lamp-oil heal where the pool flares back
-out. These become the 4 GIFs on the Steam page (6–8 s, 960 px wide, ≤ 3 MB each).
+Steam order: 2, 1, 6, 8, 4, 5, 3, 7, 9, 10. The first four show in search hover previews, so they must be the most
+striking.
 
-Order on Steam: 3, 4, 6, 2, 7, 8, 5, 1, 9, 10. The first four show up in search hover previews, so they must be
-the most striking.
+**Motion:** `capture/gameplay.{mp4,webm,gif}` is a fixed-step 12 s capture (1280×720, 30 fps) of a mid-vigil horde fight with the Hollow Stag
+stepping in near the end (`--video-only`). It's raw material for the trailer and the Steam GIF slots (crop to
+6–8 s, ≤ 3 MB each). Capture the final trailer footage on a real GPU at 60 fps.
 
 ## 7. Trailer
 See `trailer-script.md`: 30 s announcement/teaser cut, plus a shot list for the 60–75 s launch trailer.

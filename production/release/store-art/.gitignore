@@ -1,0 +1,4 @@
+# Intermediate capture output: regenerable with `node tools/package-screens.mjs` (docs/store/README.md).
+# Plates are the UI-less backgrounds the capsules are composed from; frames are the raw video frames.
+plates/
+capture/frames/

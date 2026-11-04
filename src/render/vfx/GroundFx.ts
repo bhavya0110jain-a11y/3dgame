@@ -32,6 +32,10 @@ export class GroundFx {
   private aC: THREE.InstancedBufferAttribute;
   private mat: THREE.ShaderMaterial;
   private time = 0;
+  /** Brightness governor (FxManager lowers it when the screen is crowded with light). Telegraphs ignore it. */
+  gain = 1;
+  /** Telegraph end-of-fill flash multiplier (1 with reduced flashing). */
+  flashEnd = 1.6;
 
   constructor(scene: THREE.Scene, private capacity = 160) {
     this.d = new Float32Array(capacity * F);
@@ -174,14 +178,14 @@ export class GroundFx {
       if (mode === GM_TELEGRAPH) {
         r = d[o + R1];
         // fade in fast, hold, short bright flash at the end
-        alpha = Math.min(1, t * 8) * (t > 0.92 ? 1.6 : 1);
+        alpha = Math.min(1, t * 8) * (t > 0.92 ? this.flashEnd : 1);
       } else {
         const e = 1 - Math.pow(1 - t, 3);
         r = d[o + R0] + (d[o + R1] - d[o + R0]) * e;
         alpha = mode === GM_SHOCK ? Math.pow(1 - t, 1.6) : mode === GM_GLOW ? (1 - t) * (1 - t) : Math.min(1, t * 6) * (1 - t * t);
       }
       if (age < 0) alpha = 0;
-      const inten = d[o + INT];
+      const inten = d[o + INT] * (mode === GM_TELEGRAPH ? 1 : this.gain);
       A[j] = d[o + X]; A[j + 1] = d[o + Y]; A[j + 2] = d[o + Z]; A[j + 3] = Math.max(0.01, r);
       B[j] = d[o + CR] * inten; B[j + 1] = d[o + CG] * inten; B[j + 2] = d[o + CB] * inten; B[j + 3] = alpha;
       C[j] = mode; C[j + 1] = d[o + TH] / Math.max(0.05, r); C[j + 2] = t; C[j + 3] = d[o + SEED];

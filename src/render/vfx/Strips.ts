@@ -89,8 +89,13 @@ export class Strips {
    * Append a polyline (xyz triples in `pts`, `n` points). Width and alpha are linearly interpolated head(0)→tail(n-1);
    * colour is sRGB hex × intensity. `core` (0..1) is the white-hot centre strength.
    */
-  strip(pts: Float32Array, n: number, w0: number, w1: number, color: number, intensity: number, a0: number, a1: number, core: number): void {
+  strip(pts: Float32Array, n: number, w0: number, w1: number, color: number, intensity: number, a0: number, a1: number, core: number, off = 0): void {
     if (n < 2 || this.nv + n * 2 > this.maxVerts) return;
+    if (off !== 0) {
+      // points start at pts[off] (immediate-mode strips packed into one shared buffer)
+      this.stripAt(pts, off, n, w0, w1, color, intensity, a0, a1, core);
+      return;
+    }
     tmpCol.setHex(color);
     const r = tmpCol.r * intensity, g = tmpCol.g * intensity, b = tmpCol.b * intensity;
     const base = this.nv;
@@ -125,6 +130,14 @@ export class Strips {
     }
   }
 
+  private scratch = new Float32Array(64 * 3);
+  private stripAt(pts: Float32Array, off: number, n: number, w0: number, w1: number, color: number, intensity: number, a0: number, a1: number, core: number): void {
+    const k = Math.min(n, 64);
+    const s = this.scratch;
+    for (let i = 0; i < k * 3; i++) s[i] = pts[off + i];
+    this.strip(s, k, w0, w1, color, intensity, a0, a1, core, 0);
+  }
+
   end(): void {
     this.geo.setDrawRange(0, this.ni);
     if (this.nv > 0) {
@@ -155,6 +168,8 @@ interface Bolt {
 /** Jagged, flickering lightning bolts (pooled). Re-jagged ~30×/s so they crackle while alive. */
 export class Lightning {
   private bolts: Bolt[] = [];
+  /** Reduced-flashing mode: no per-frame brightness strobe (bolts still crackle in shape). */
+  steady = false;
   constructor(private capacity = 96) {
     for (let i = 0; i < capacity; i++) {
       this.bolts.push({ active: false, ax: 0, ay: 0, az: 0, bx: 0, by: 0, bz: 0, segs: 8, width: 0.3, color: 0xffffff, age: 0, life: 0.2, regen: 0, jitter: 0.5, pts: new Float32Array(BOLT_PTS * 3) });
@@ -211,7 +226,7 @@ export class Lightning {
       b.regen -= dt;
       if (b.regen <= 0) { b.regen = 0.035; this.jag(b); }
       const t = b.age / b.life;
-      const flick = 0.55 + 0.45 * Math.random();
+      const flick = this.steady ? 0.8 : 0.55 + 0.45 * Math.random();
       const a = (1 - t * t) * flick;
       // wide colour glow + thin hot core in one strip
       strips.strip(b.pts, b.segs + 1, b.width * 2.2, b.width * 1.8, b.color, 0.9, a, a, 0.9);

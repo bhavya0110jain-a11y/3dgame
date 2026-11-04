@@ -3,7 +3,7 @@ import type { GameContext } from '../game/types';
 import type { Enemy } from './Enemies';
 import { Frame } from '../render/vfx/atlas';
 import { PF_BOUNCE, PF_FLICKER, PF_SOFTFADE } from '../render/vfx/Particles';
-import { createProjectileBillboards, createShardGeometry, PS_BEAM, PS_COMET, PS_FROST, PS_MARKER, PS_VOID } from '../render/vfx/projectileVisuals';
+import { createProjectileBillboards, createShardGeometry, PS_BEAM, PS_COMET, PS_FROST, PS_MARKER, PS_MOTH, PS_VOID } from '../render/vfx/projectileVisuals';
 
 export interface Projectile {
   active: boolean;
@@ -36,12 +36,12 @@ export interface Projectile {
 }
 
 /** Visual kinds. 'auto' (default) picks from `source`. */
-export type VfxKind = 'auto' | 'ember' | 'comet' | 'beam' | 'shard' | 'hostile';
+export type VfxKind = 'auto' | 'ember' | 'comet' | 'beam' | 'shard' | 'hostile' | 'moth' | 'spear';
 
 export type ProjectileSpawn = Partial<Projectile> & Pick<Projectile, 'x' | 'z' | 'vx' | 'vz' | 'damage'>;
 
-const V_EMBER = 0, V_COMET = 1, V_BEAM = 2, V_SHARD = 3, V_HOSTILE = 4;
-const kindIndex: Record<VfxKind, number> = { auto: -1, ember: V_EMBER, comet: V_COMET, beam: V_BEAM, shard: V_SHARD, hostile: V_HOSTILE };
+const V_EMBER = 0, V_COMET = 1, V_BEAM = 2, V_SHARD = 3, V_HOSTILE = 4, V_MOTH = 5, V_SPEAR = 6;
+const kindIndex: Record<VfxKind, number> = { auto: -1, ember: V_EMBER, comet: V_COMET, beam: V_BEAM, shard: V_SHARD, hostile: V_HOSTILE, moth: V_MOTH, spear: V_SPEAR };
 
 function styleFor(p: Projectile): number {
   if (p.hostile) return V_HOSTILE;
@@ -49,8 +49,12 @@ function styleFor(p: Projectile): number {
   if (k >= 0) return k;
   switch (p.source) {
     case 'ember_bolt':
-    case 'sunspear_volley':
       return V_EMBER;
+    case 'sunspear_volley':
+      return V_SPEAR;
+    case 'moth_lantern':
+    case 'lunar_monarchs':
+      return V_MOTH;
     case 'wick_lance':
     case 'beacon_ray':
       return V_BEAM;
@@ -160,6 +164,7 @@ export class ProjectileManager {
     const player = ctx.player;
     const fx = ctx.fx;
     this.fxRef = fx;
+    fx.setFocus(player.x, player.z);
     this.time += dt;
     const ps = fx.particles;
     const room = 1 - ps.pressure;
@@ -236,7 +241,7 @@ export class ProjectileManager {
     const ps = fx.particles;
     const style = p.styleIdx ?? V_COMET;
     // rate: particles per second scaled by p.trail and pressure
-    const rate = (style === V_BEAM ? 70 : style === V_HOSTILE ? 26 : 40) * Math.max(0.15, p.trail) * room;
+    const rate = (style === V_BEAM ? 70 : style === V_SPEAR ? 42 : style === V_HOSTILE ? 26 : style === V_MOTH ? 22 : 40) * Math.max(0.15, p.trail) * room;
     let n = rate * dt;
     const sc = p.scale;
     while (n > 0) {
@@ -249,8 +254,16 @@ export class ProjectileManager {
           if (ps.rand() < 0.75) ps.emit(x + (ps.rand() - 0.5) * 0.15, p.y + (ps.rand() - 0.5) * 0.15, z + (ps.rand() - 0.5) * 0.15, -p.vx * 0.08 + (ps.rand() - 0.5), 0.6 + ps.rand() * 1.2, -p.vz * 0.08 + (ps.rand() - 0.5), 0.25 + ps.rand() * 0.2, 0.28 * sc, 0.06, 0xfff0b0, 0xff4a10, 3, Frame.GLOW, 1, 1.5, 2);
           else ps.emit(x, p.y, z, -p.vx * 0.05, 0.8, -p.vz * 0.05, 0.6, 0.3 * sc, 0.9 * sc, 0x3a2a2a, 0x18141a, 1, Frame.SMOKE, 0, 0.5, 1, 0, PF_SOFTFADE, ps.rand() * 6, 0, 0, 0.2);
           break;
+        case V_SPEAR:
+          if (ps.rand() < 0.8) ps.emit(x + (ps.rand() - 0.5) * 0.15, p.y + (ps.rand() - 0.5) * 0.15, z + (ps.rand() - 0.5) * 0.15, -p.vx * 0.06 + (ps.rand() - 0.5), 0.6 + ps.rand() * 1.4, -p.vz * 0.06 + (ps.rand() - 0.5), 0.3 + ps.rand() * 0.2, 0.26 * sc, 0.06, 0xfff6c0, 0xff8a10, 2.4, ps.rand() < 0.3 ? Frame.SPARKLE : Frame.GLOW, 1, 1.5, 2, 0, PF_FLICKER, ps.rand() * 6);
+          else ps.emit(x, p.y, z, -p.vx * 0.04, 1, -p.vz * 0.04, 0.4, 0.5 * sc, 0.1, 0xffe08a, 0xff5a10, 2.4, Frame.FLAME, 1, 1, 1, 0, PF_FLICKER, ps.rand() - 0.5);
+          break;
+        case V_MOTH:
+          // wing-dust: sparkles that drift down behind the moth
+          ps.emit(x + (ps.rand() - 0.5) * 0.3, p.y + (ps.rand() - 0.5) * 0.2, z + (ps.rand() - 0.5) * 0.3, (ps.rand() - 0.5) * 0.6, -0.3 - ps.rand() * 0.4, (ps.rand() - 0.5) * 0.6, 0.45 + ps.rand() * 0.3, 0.16 * sc, 0.04, 0xffffff, p.color, 2.4, Frame.SPARKLE, 1, -0.5, 1, 0, PF_FLICKER, ps.rand() * 6);
+          break;
         case V_BEAM:
-          ps.emit(x + (ps.rand() - 0.5) * 0.2, p.y + (ps.rand() - 0.5) * 0.2, z + (ps.rand() - 0.5) * 0.2, (ps.rand() - 0.5) * 2, 0.5 + ps.rand() * 2, (ps.rand() - 0.5) * 2, 0.18 + ps.rand() * 0.15, 0.2 * sc, 0.04, 0xffffff, p.color, 3.2, Frame.SPARKLE, 1, -2, 2, 0, PF_FLICKER, ps.rand() * 6);
+          ps.emit(x + (ps.rand() - 0.5) * 0.2, p.y + (ps.rand() - 0.5) * 0.2, z + (ps.rand() - 0.5) * 0.2, (ps.rand() - 0.5) * 2, 0.5 + ps.rand() * 2, (ps.rand() - 0.5) * 2, 0.18 + ps.rand() * 0.15, 0.2 * Math.min(sc, 1.3), 0.04, 0xffffff, p.color, 2.6, Frame.SPARKLE, 1, -2, 2, 0, PF_FLICKER, ps.rand() * 6);
           break;
         case V_SHARD:
           if (ps.rand() < 0.5) fx.frostPuff(x, p.y, z, 1, 0.35 * sc);
@@ -270,7 +283,7 @@ export class ProjectileManager {
     const fx = ctx.fx;
     const style = p.styleIdx ?? V_COMET;
     if (style === V_SHARD) fx.frostPuff(p.x, p.y, p.z, 3, 0.5);
-    else if (style === V_EMBER) {
+    else if (style === V_EMBER || style === V_SPEAR) {
       const ps = fx.particles;
       for (let i = 0; i < 3; i++) ps.emit(p.x, p.y, p.z, (ps.rand() - 0.5) * 3, 1 + ps.rand() * 2, (ps.rand() - 0.5) * 3, 0.3, 0.45, 0.1, 0xffe0a0, 0xff4a10, 2.6, Frame.FLAME, 1, 1, 2, 0, PF_FLICKER, ps.rand() - 0.5);
     }
@@ -329,7 +342,9 @@ export class ProjectileManager {
       let inten = 2.4;
       switch (style) {
         case V_EMBER: size = 0.26 * sc; tail = Math.min(2.4, speed * 0.11) * sc; st = PS_COMET; inten = 2.8; break;
-        case V_BEAM: size = 0.24 * sc; tail = Math.min(5.5, speed * 0.24) * sc; st = PS_BEAM; inten = 2.4; break;
+        case V_BEAM: size = 0.24 * sc; tail = Math.min(5.5, speed * 0.24) * sc; st = PS_BEAM; inten = 2.4 / Math.max(1, sc * 0.75); break;
+        case V_SPEAR: size = 0.24 * sc; tail = Math.min(2.6, speed * 0.12) * sc; st = PS_BEAM; inten = 1.9; break;
+        case V_MOTH: size = 0.6 * sc; tail = Math.min(0.9, speed * 0.06) * sc; st = PS_MOTH; inten = 1.6; break;
         case V_SHARD: size = 0.34 * sc; tail = Math.min(1.8, speed * 0.12) * sc; st = PS_FROST; inten = 2.6; tmpC.setHex(0x4ab8ff); break;
         case V_HOSTILE: size = 0.32 * sc; tail = Math.min(1.2, speed * 0.12); st = PS_VOID; inten = 2.2; break;
         default: size = 0.24 * sc; tail = Math.min(1.8, speed * 0.1) * sc; st = PS_COMET; inten = 2.4;

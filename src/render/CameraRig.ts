@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { renderView, VIEW_TALL } from './Quality';
 
 const smooth = (k: number, dt: number) => 1 - Math.exp(-k * dt);
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -8,6 +9,8 @@ const HEIGHT = 18.5;
 const BACK = 14.5;
 /** Direction the menu hero shot looks (towards the low moon over the -Z horizon, see Sky.moonDir). */
 const HERO_FWD = new THREE.Vector3(-0.3, 0, -1).normalize();
+/** Duration (s) of the menu → run swoop. */
+const SWOOP_S = 1.35;
 
 /**
  * Camera feel (driven from Game.updateCamera):
@@ -15,7 +18,7 @@ const HERO_FWD = new THREE.Vector3(-0.3, 0, -1).normalize();
  *    don't jerk the frame), zoom that eases out with crowd size / boss presence, boss-aware framing that drifts
  *    towards the boss, trauma-based shake (amplitude = trauma², smooth multi-sine noise, a touch of roll)
  *  - menu: low-angle hero shot of the bearer on the left third, silhouetted against the moon, slow sway
- *  - menu → run: eased 1.1 s swoop from the hero shot down into the gameplay angle
+ *  - menu → run: smootherstep 1.35 s crane swoop from the hero shot up into the gameplay angle
  * Allocation-free per frame.
  */
 export class CameraRig {
@@ -33,11 +36,13 @@ export class CameraRig {
   private mode: 'menu' | 'follow' = 'menu';
   private shakeT = 0;
   private menuT = 0;
+  private corner = new THREE.Vector3();
 
   constructor(private camera: THREE.PerspectiveCamera) {}
 
   /** Snap the gameplay camera onto (x, z) without smoothing (e.g. after a teleport). */
   snap(x: number, z: number): void {
+    this.mode = 'follow'; // BUG-QA-021: a snap also cancels a pending menu→run swoop
     this.focus.set(x, 0, z);
     this.lead.set(0, 0, 0);
     this.blend = 1;
@@ -66,6 +71,41 @@ export class CameraRig {
     cam.lookAt(this.look);
     this.focus.set(x, 0, z);
     this.zoom = 1;
+    this.updateView();
+  }
+
+  /** Publishes the camera's ground footprint (renderView) for world culling. Allocation-free. */
+  updateView(): void {
+    const cam = this.camera;
+    cam.updateMatrixWorld();
+    const v = renderView;
+    const o = cam.position;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (let i = 0; i < 4; i++) {
+      const p = this.corner.set(i & 1 ? 1 : -1, i & 2 ? 1 : -1, 0.5).unproject(cam).sub(o);
+      // a corner ray that does not dive steeply enough reaches the far fog / horizon: no finite footprint
+      if (p.y > -0.05 * p.length() || o.y <= VIEW_TALL) {
+        v.valid = false;
+        return;
+      }
+      for (let k = 0; k < 2; k++) {
+        const t = ((k ? VIEW_TALL : 0) - o.y) / p.y;
+        const x = o.x + p.x * t;
+        const z = o.z + p.z * t;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (z < minZ) minZ = z;
+        if (z > maxZ) maxZ = z;
+      }
+    }
+    v.valid = true;
+    v.minX = minX;
+    v.maxX = maxX;
+    v.minZ = minZ;
+    v.maxZ = maxZ;
   }
 
   /**
@@ -133,15 +173,21 @@ export class CameraRig {
     }
 
     if (this.blend < 1) {
-      this.blend = Math.min(1, this.blend + dt / 1.1);
-      const e = this.blend * this.blend * (3 - 2 * this.blend);
+      // swoop: smootherstep ease (zero velocity AND acceleration at both ends), a gentle crane arc so the camera
+      // lifts over the glade instead of sliding through it, and the gaze tips down slightly ahead of the body
+      // so the bearer never leaves the frame mid-move. dt is clamped so a load hitch cannot skip the move.
+      const b = (this.blend = Math.min(1, this.blend + Math.min(dt, 1 / 30) / SWOOP_S));
+      const e = b * b * b * (b * (b * 6 - 15) + 10);
+      const eLook = 1 - (1 - e) * (1 - e);
       cam.position.copy(this.fromPos).lerp(this.desiredPos, e);
-      this.look.copy(this.fromLook).lerp(this.desiredLook, e);
+      cam.position.y += Math.sin(Math.PI * e) * 2.2;
+      this.look.copy(this.fromLook).lerp(this.desiredLook, eLook);
     } else {
       cam.position.copy(this.desiredPos);
       this.look.copy(this.desiredLook);
     }
     cam.lookAt(this.look);
     if (a > 1e-4) cam.rotateZ(Math.sin(this.shakeT * 23.7 + 0.8) * a * 0.03);
+    this.updateView();
   }
 }

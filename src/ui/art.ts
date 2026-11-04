@@ -142,3 +142,54 @@ export function pad(btn: 'A' | 'B' | 'X' | 'Y' | 'LB' | 'RB' | 'Start' | 'D-pad'
   }
   return `<kbd class="glyph key pad-word">${btn}</kbd>`;
 }
+
+/**
+ * Reliquary chest (front view) for the chest reveal. The lid, the inner light and the moon clasp are separate groups
+ * (`.rq-lid`, `.rq-beam`, `.rq-clasp`) so CSS can open it. Original design: domed indigo lid, gold straps, crescent clasp.
+ */
+export function reliquary(): string {
+  const id = `rq${++uid}`;
+  return `<svg class="reliquary" viewBox="0 0 220 200" aria-hidden="true">
+  <defs>
+    <linearGradient id="${id}body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6f52d6"/><stop offset=".55" stop-color="#4a33a6"/><stop offset="1" stop-color="#2c1d72"/></linearGradient>
+    <linearGradient id="${id}lid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8b72ee"/><stop offset="1" stop-color="#4a33a6"/></linearGradient>
+    <linearGradient id="${id}gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff2a8"/><stop offset=".5" stop-color="#ffcf3a"/><stop offset="1" stop-color="#d98a00"/></linearGradient>
+    <linearGradient id="${id}beam" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#fffbe0" stop-opacity=".95"/><stop offset=".45" stop-color="#ffe27a" stop-opacity=".5"/><stop offset="1" stop-color="#ffb13a" stop-opacity="0"/></linearGradient>
+    <radialGradient id="${id}mouth" cx="50%" cy="100%" r="80%"><stop offset="0" stop-color="#fffbe6"/><stop offset=".5" stop-color="#ffd25a"/><stop offset="1" stop-color="#ff9a2a"/></radialGradient>
+  </defs>
+  <ellipse cx="110" cy="188" rx="86" ry="9" fill="#05031a" opacity=".55"/>
+  <path class="rq-beam" d="M58 112 L162 112 L214 -10 L6 -10 Z" fill="url(#${id}beam)"/>
+  <g class="rq-body">
+    <path d="M40 104h140v68a12 12 0 0 1-12 12H52a12 12 0 0 1-12-12z" fill="url(#${id}body)" stroke="#120b2e" stroke-width="6" stroke-linejoin="round"/>
+    <path d="M48 112h124" stroke="#fff" stroke-width="3" opacity=".22" stroke-linecap="round"/>
+    <path class="rq-mouth" d="M44 104h132l-6 10H50z" fill="url(#${id}mouth)"/>
+    <path d="M66 104v80M154 104v80" stroke="#120b2e" stroke-width="16"/>
+    <path d="M66 104v80M154 104v80" stroke="url(#${id}gold)" stroke-width="10"/>
+    <path d="M40 160h140" stroke="#120b2e" stroke-width="5" opacity=".35"/>
+  </g>
+  <g class="rq-lid">
+    <path d="M36 104V86a30 30 0 0 1 30-30h88a30 30 0 0 1 30 30v18z" fill="url(#${id}lid)" stroke="#120b2e" stroke-width="6" stroke-linejoin="round"/>
+    <path d="M52 76a20 20 0 0 1 16-11h84" fill="none" stroke="#fff" stroke-width="4" opacity=".3" stroke-linecap="round"/>
+    <path d="M66 58v46M154 58v46" stroke="#120b2e" stroke-width="16"/>
+    <path d="M66 58v46M154 58v46" stroke="url(#${id}gold)" stroke-width="10"/>
+    <path d="M32 98h156v12H32z" fill="url(#${id}gold)" stroke="#120b2e" stroke-width="5" stroke-linejoin="round"/>
+  </g>
+  <g class="rq-clasp">
+    <circle cx="110" cy="122" r="17" fill="url(#${id}gold)" stroke="#120b2e" stroke-width="5"/>
+    <path d="M115 112a10.5 10.5 0 1 0 0 20 8 8 0 0 1 0-20z" fill="#2c1d72"/>
+  </g>
+  <g class="rq-sparks" fill="#fff6c8">
+    <path d="M30 40l3 7 7 3-7 3-3 7-3-7-7-3 7-3z"/><path d="M188 30l2.4 5.6 5.6 2.4-5.6 2.4-2.4 5.6-2.4-5.6-5.6-2.4 5.6-2.4z"/><path d="M172 80l2 4.5 4.5 2-4.5 2-2 4.5-2-4.5-4.5-2 4.5-2z"/>
+  </g>
+</svg>`;
+}
+
+/** Layered moonlit hills silhouette for the dawn screen (fills its box; preserveAspectRatio none). */
+export function dawnHills(): string {
+  return `<svg class="dawn-hills" viewBox="0 0 1200 260" preserveAspectRatio="none" aria-hidden="true">
+  <path d="M0 150 C120 110 220 120 320 140 S520 90 640 112 S860 150 980 110 S1140 96 1200 120 V260 H0Z" fill="#4a2f6e" opacity=".75"/>
+  <path d="M0 190 C140 160 260 150 380 176 S600 200 720 170 S960 140 1080 172 S1170 190 1200 180 V260 H0Z" fill="#2c1b4e"/>
+  <path d="M60 176 l14 -40 14 40z M96 182 l10 -28 10 28z M1040 170 l16 -46 16 46z M1084 178 l11 -30 11 30z M900 168 l9 -26 9 26z" fill="#22143e"/>
+  <path d="M0 226 C200 206 380 214 560 228 S900 236 1200 214 V260 H0Z" fill="#150c2c"/>
+</svg>`;
+}

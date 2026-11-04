@@ -3,7 +3,7 @@ import '@fontsource/fredoka/latin-400.css';
 import '@fontsource/fredoka/latin-500.css';
 import '@fontsource/fredoka/latin-600.css';
 import { icon } from './icons';
-import { portrait, nightArt, lanternGauge, emblem, kbd, pad, hex } from './art';
+import { portrait, nightArt, lanternGauge, emblem, kbd, pad, hex, reliquary, dawnHills } from './art';
 import { uiSettings, applyUiPrefs, motionReduced, type FullSettings } from './prefs';
 import type { Game } from '../game/Game';
 import type { UpgradeChoice } from '../game/Upgrades';
@@ -41,22 +41,60 @@ export function fmtTime(sec: number): string {
 
 type Screen =
   | 'menu' | 'setup' | 'hearth' | 'settings' | 'hud' | 'levelup' | 'pause' | 'gameover' | 'howto'
-  | 'achievements' | 'credits' | 'none';
+  | 'achievements' | 'credits' | 'chest' | 'dawn' | 'none';
+
+/** Screens that sit over a live (frozen) run: the HUD stays visible, dimmed, behind them. */
+const RUN_OVERLAYS: ReadonlySet<Screen> = new Set<Screen>(['levelup', 'pause', 'chest', 'dawn']);
+/** Screens whose content is shrunk (CSS zoom) to fit the viewport instead of scrolling. [content selector, min zoom] */
+const FIT: Partial<Record<Screen, [string, number]>> = {
+  menu: ['.menu-col', 0.6],
+  levelup: ['.lu-wrap', 0.62],
+  chest: ['.ch-wrap', 0.6],
+  dawn: ['.dw-wrap', 0.6],
+  pause: ['.pause-frame', 0.62],
+};
+
+/** Structural copy of Game's DawnInfo (feature-detected; the UI never needs Game's type to compile). */
+interface DawnInfoLike { bossId: string; bossName: string; ashIfDawn: number; endlessBossEvery: number; time: number; kills: number; level: number }
+
+/** A first-run onboarding hint ('tutorial:hint' event payload). */
+interface Hint { id: string; text: string; duration: number; priority: number }
+/** Glyph shown on a hint card, per hint id (input-specific for movement). */
+const HINT_ICON: Record<string, string> = {
+  ember: 'sparkle', damage: 'wick', levelup: 'star', oil: 'oil', lowlight: 'warning', elite: 'skull', chest: 'chest', boss: 'crown',
+};
 
 type PadBtn = Parameters<typeof pad>[0];
 type SettingsTab = 'audio' | 'video' | 'gameplay' | 'access';
 
 /** Rarity treatment of an upgrade card. */
-function rarityOf(c: UpgradeChoice): { cls: string; label: string; isNew: boolean } {
+function rarityOf(c: UpgradeChoice): { cls: string; label: string; isNew: boolean; shape: string } {
   switch (c.kind) {
-    case 'weapon-new': return { cls: 'r-weapon', label: 'New Weapon', isNew: true };
-    case 'weapon-up': return { cls: 'r-weapon', label: 'Weapon', isNew: false };
-    case 'evolution': return { cls: 'r-evo', label: 'Evolution', isNew: false };
-    case 'passive': return { cls: 'r-relic', label: c.level <= 1 ? 'New Relic' : 'Relic', isNew: c.level <= 1 };
-    case 'heal': return { cls: 'r-boon', label: 'Boon', isNew: false };
-    case 'ash': return { cls: 'r-ash', label: 'Boon', isNew: false };
-    default: return c.id === 'endless' ? { cls: 'r-ash', label: 'Endless', isNew: false } : { cls: 'r-evo', label: 'Victory', isNew: false };
+    case 'weapon-new': return { cls: 'r-weapon', label: 'New Weapon', isNew: true, shape: 'rar-weapon' };
+    case 'weapon-up': return { cls: 'r-weapon', label: 'Weapon', isNew: false, shape: 'rar-weapon' };
+    case 'evolution': return { cls: 'r-evo', label: 'Evolution', isNew: false, shape: 'rar-evo' };
+    case 'passive': return { cls: 'r-relic', label: c.level <= 1 ? 'New Relic' : 'Relic', isNew: c.level <= 1, shape: 'rar-relic' };
+    case 'heal': return { cls: 'r-boon', label: 'Kindling', isNew: false, shape: 'rar-boon' };
+    case 'ash': return { cls: 'r-ash', label: 'Ash', isNew: false, shape: 'rar-ash' };
+    default: return c.id === 'endless' ? { cls: 'r-ash', label: 'Endless', isNew: false, shape: 'rar-ash' } : { cls: 'r-evo', label: 'Victory', isNew: false, shape: 'rar-evo' };
   }
+}
+
+/** A reliquary item after merging repeats of the same upgrade ("Swift Quill ×2, Lv 1 → 3"). */
+interface ChestItem { c: UpgradeChoice; from: number; to: number; count: number }
+function mergeChest(items: UpgradeChoice[]): ChestItem[] {
+  const out: ChestItem[] = [];
+  for (const c of items) {
+    const prev = c.kind !== 'evolution' && c.level > 0 ? out.find((o) => o.c.kind === c.kind && o.c.id === c.id) : undefined;
+    if (prev) {
+      prev.from = Math.min(prev.from, c.level - 1);
+      prev.to = Math.max(prev.to, c.level);
+      prev.count++;
+    } else out.push({ c, from: c.level - 1, to: c.level, count: 1 });
+  }
+  // evolution always leads
+  out.sort((a, b) => Number(b.c.kind === 'evolution') - Number(a.c.kind === 'evolution'));
+  return out;
 }
 
 const NAV_SEL = 'button:not([disabled]), input, [data-nav]';
@@ -93,6 +131,8 @@ export class UI {
     bossName: HTMLElement;
     bossSub: HTMLElement;
     fps: HTMLElement;
+    dawnTrack: HTMLElement;
+    dawnFill: HTMLElement;
   };
   private toastEl: HTMLElement;
   private toastText: HTMLElement;
@@ -118,6 +158,21 @@ export class UI {
   private promptMode = '';
   private modeCheck = 0;
   private sawKeyboard = false;
+  // onboarding hints
+  private hintEl: HTMLElement;
+  private hintQueue: Hint[] = [];
+  private hintCur: Hint | null = null;
+  private hintLeft = 0;
+  private hintGap = 0;
+  private lastTick = 0;
+  private levelTip = '';
+  // reliquary reveal
+  private chestRevealAt = 0;
+  private chestTimers: number[] = [];
+  /** Seconds the current reliquary reveal wants on screen (reveal animation + reading time). Read by Game if it wants. */
+  chestHold = 0;
+  private chestBar: HTMLElement | null = null;
+  private chestBar0 = 0;
 
   constructor(private game: Game) {
     this.root = document.getElementById('ui-root')!;
@@ -131,6 +186,10 @@ export class UI {
     this.toastText = this.toastEl.querySelector('.toast-text')!;
     this.toastIcon = this.toastEl.querySelector('.toast-icon')!;
     this.root.appendChild(this.toastEl);
+    this.hintEl = el('div', 'hint-card', '<span class="hint-glyph"></span><span class="hint-body"><small>Tip</small><span class="hint-text"></span></span><i class="hint-time"></i>');
+    this.hintEl.setAttribute('role', 'status');
+    this.hintEl.setAttribute('aria-live', 'polite');
+    this.root.appendChild(this.hintEl);
     this.buildHud();
 
     // UI sounds: focus changes (mouse hover focuses too, see below) and clicks
@@ -139,8 +198,8 @@ export class UI {
       if (!this.silentFocus && t.matches?.('button:not([disabled]), [data-nav]')) this.game.audio.play('hover');
     });
     this.root.addEventListener('click', (e) => {
-      const t = e.target as HTMLElement;
-      if (t.closest('button')) this.game.audio.play('click');
+      const b = (e.target as HTMLElement).closest<HTMLElement>('button, [data-nav]');
+      if (b) this.game.audio.play(this.clickSound(b));
     });
     // Mouse hover == focus, so keyboard / pad / mouse share one "selected" state
     this.root.addEventListener('pointerover', (e) => {
@@ -153,6 +212,10 @@ export class UI {
     window.addEventListener('gamepadconnected', () => (this.padConnected = true));
     window.addEventListener('gamepaddisconnected', () => (this.padConnected = !!navigator.getGamepads?.().some((g) => g)));
     game.events.on('player:damaged', () => (this.hitT = 0.28));
+    // first-run onboarding (Tutorial emits these only while it is active; if it never fires nothing changes)
+    game.events.on('tutorial:hint', (h) => this.pushHint(h));
+    window.addEventListener('resize', () => this.fitScreen(this.current));
+    void document.fonts?.ready.then(() => this.fitScreen(this.current));
     const tick = () => {
       this.uiTick();
       requestAnimationFrame(tick);
@@ -171,13 +234,26 @@ export class UI {
     this.sawKeyboard = true;
     if (code.startsWith('Arrow') || code === 'Tab') document.documentElement.classList.add('kbd-nav');
     const cur = this.current;
-    if (cur === 'levelup') {
+    if (cur === 'levelup' || cur === 'dawn') {
       if (code.startsWith('Digit') && performance.now() < this.lockUntil) {
         e.stopPropagation();
         return;
       }
-      if (code === 'KeyR' && !e.repeat) this.screens.get('levelup')?.querySelector<HTMLElement>('[data-act=reroll]:not([disabled])')?.click();
-      if (code === 'KeyB' && !e.repeat) this.screens.get('levelup')?.querySelector<HTMLElement>('[data-act=banish]:not([disabled])')?.click();
+      if (cur === 'dawn' || e.repeat) return;
+      if (code === 'KeyR' || code === 'KeyB') {
+        const b = this.screens.get('levelup')?.querySelector<HTMLButtonElement>(`[data-act=${code === 'KeyR' ? 'reroll' : 'banish'}]`);
+        if (b && !b.disabled) b.click();
+        else this.game.audio.play('deny');
+      }
+      return;
+    }
+    if (cur === 'chest' && (code === 'Space' || code === 'Enter' || code === 'NumpadEnter' || code.startsWith('Digit'))) {
+      // first press finishes the reveal animation, the next one continues (Game closes the chest on Space/Enter)
+      if (!this.chestRevealed() || performance.now() < this.lockUntil) {
+        e.stopPropagation();
+        e.preventDefault();
+        if (!e.repeat) this.finishChestReveal();
+      }
       return;
     }
     if (cur === 'settings' && (code === 'KeyQ' || code === 'KeyE') && !e.repeat) this.cycleTab(code === 'KeyQ' ? -1 : 1);
@@ -186,13 +262,27 @@ export class UI {
       // swallow so Game doesn't also toggle pause when settings were opened from the pause menu
       e.stopPropagation();
       e.preventDefault();
-      this.screens.get(cur)?.querySelector<HTMLElement>('[data-act=back]')?.click();
+      this.screens.get(cur)?.querySelector<HTMLElement>('[data-act=intro-ok], [data-act=back]')?.click();
     }
   }
 
   /** Per-frame UI housekeeping: input-prompt mode, UI-only gamepad buttons, toast timer. No allocations when idle. */
   private uiTick(): void {
     const now = performance.now();
+    const dt = Math.min(0.1, (now - (this.lastTick || now)) / 1000);
+    this.lastTick = now;
+    this.tickHint(dt);
+    if (this.current === 'chest' && this.chestBar) {
+      // the drain bar follows Game's live auto-continue countdown when it exposes one (else the CSS animation runs)
+      const left = (this.game as unknown as { chestTimeLeft?: number }).chestTimeLeft;
+      if (typeof left === 'number' && left > 0) {
+        if (left > this.chestBar0) {
+          this.chestBar0 = left;
+          this.chestBar.style.animation = 'none';
+        }
+        this.chestBar.style.transform = `scaleX(${(left / this.chestBar0).toFixed(3)})`;
+      }
+    }
     if (now > this.modeCheck) {
       this.modeCheck = now + 250;
       const pref = this.settings.prompts;
@@ -225,8 +315,11 @@ export class UI {
     document.documentElement.classList.add('kbd-nav');
     const s = this.screens.get(this.current);
     if (this.current === 'levelup') {
-      if (i === 2) s?.querySelector<HTMLElement>('[data-act=reroll]:not([disabled])')?.click();
-      if (i === 3) s?.querySelector<HTMLElement>('[data-act=banish]:not([disabled])')?.click();
+      const b = s?.querySelector<HTMLButtonElement>(`[data-act=${i === 2 ? 'reroll' : 'banish'}]`);
+      if (i === 2 || i === 3) {
+        if (b && !b.disabled) b.click();
+        else this.game.audio.play('deny');
+      }
     } else if (this.current === 'settings' && (i === 4 || i === 5)) this.cycleTab(i === 4 ? -1 : 1);
   }
 
@@ -234,7 +327,7 @@ export class UI {
   private screen(name: Screen, build: (root: HTMLElement) => void): HTMLElement {
     let s = this.screens.get(name);
     // rebuilding the screen that is already up (tab switch, purchase, selection) must not replay entrance animations
-    const instant = !!s && name !== 'levelup' && this.current === name && s.classList.contains('visible');
+    const instant = !!s && name !== 'levelup' && name !== 'chest' && this.current === name && s.classList.contains('visible');
     if (s) s.remove();
     s = el('div', `screen screen-${name}${instant ? ' instant' : ''}`);
     build(s);
@@ -246,12 +339,15 @@ export class UI {
   show(name: Screen): void {
     this.current = name;
     for (const [k, s] of this.screens) s.classList.toggle('visible', k === name);
-    const hudOn = name === 'hud' || name === 'levelup' || name === 'pause';
+    const hudOn = name === 'hud' || RUN_OVERLAYS.has(name);
+    if (name !== 'chest') this.clearChestTimers();
+    if (name === 'menu' || name === 'gameover' || name === 'setup') this.clearHints(); // run over (settings-from-pause keeps them)
     this.hud.root.classList.toggle('visible', hudOn);
     this.hud.root.classList.toggle('behind', hudOn && name !== 'hud');
     this.root.classList.toggle('in-run', hudOn);
     this.root.classList.toggle('overlay-up', name !== 'hud');
     if (name !== 'hud' && name !== 'none') {
+      this.fitScreen(name);
       requestAnimationFrame(() => {
         const s = this.screens.get(name);
         if (!s || this.current !== name) return;
@@ -274,6 +370,32 @@ export class UI {
     this.silentFocus = false;
   }
 
+  /**
+   * Shrinks a screen's content (CSS zoom) so it fits the viewport rather than scrolling — e.g. the main menu at 130%
+   * UI scale on a 720p window. Leaves a little scroll only below the screen's minimum zoom.
+   */
+  private fitScreen(name: Screen): void {
+    const fit = FIT[name];
+    const s = this.screens.get(name);
+    if (!fit || !s) return;
+    const c = s.querySelector<HTMLElement>(fit[0]);
+    if (!c) return;
+    c.style.removeProperty('zoom');
+    const cs = getComputedStyle(s);
+    const avail = s.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - (name === 'menu' ? 8 : 4);
+    const h = c.offsetHeight;
+    if (h > avail && avail > 0) c.style.zoom = String(Math.max(fit[1], Math.floor((avail / h) * 100) / 100));
+  }
+
+  /** Which UI sound a click makes: back / deny (unavailable) / confirm (primary actions) / plain click. */
+  private clickSound(b: HTMLElement): 'back' | 'deny' | 'confirm' | 'click' {
+    const act = b.dataset.act ?? '';
+    if (act === 'back' || act === 'back-foot' || act === 'resume') return 'back';
+    if (b.getAttribute('aria-disabled') === 'true' || b.classList.contains('poor')) return 'deny';
+    if (b.classList.contains('btn-primary') || b.classList.contains('ucard') || b.classList.contains('dawn-card') || b.classList.contains('meta') || act === 'continue') return 'confirm';
+    return 'click';
+  }
+
   toast(msg: string, ms = 2200): void {
     let kind = '';
     let ic = 'sparkle';
@@ -282,7 +404,7 @@ export class UI {
     else if (/master|enraged/i.test(msg)) { kind = 'toast-boss'; ic = 'crown'; }
     else if (/need \d+ more/i.test(msg)) { kind = 'toast-warn'; ic = 'ash'; }
     // the reliquary reveal already celebrates the evolution on screen
-    if (kind === 'toast-evo' && this.current === 'levelup') return;
+    if (kind === 'toast-evo' && (this.current === 'levelup' || this.current === 'chest')) return;
     this.toastEl.className = `toast ${kind}`;
     this.toastIcon.innerHTML = icon(ic);
     this.toastText.textContent = msg;
@@ -306,7 +428,7 @@ export class UI {
       cur.dispatchEvent(new Event('input'));
       return;
     }
-    const btns = Array.from(s.querySelectorAll<HTMLElement>(NAV_SEL)).filter((b) => b.offsetParent !== null);
+    const btns = Array.from(s.querySelectorAll<HTMLElement>(NAV_SEL)).filter((b) => b.offsetParent !== null && !b.closest('[inert]'));
     if (!btns.length) return;
     if (!btns.includes(cur)) {
       (s.querySelector<HTMLElement>('[data-autofocus]') ?? btns[0]).focus({ preventScroll: true });
@@ -363,6 +485,92 @@ export class UI {
     if (!Array.isArray(list)) return null;
     const have = new Set(this.game.save.achievements ?? []);
     return list.map((def) => ({ def, earned: have.has(def.id) }));
+  }
+
+  // ------------------------------------------------------------------ onboarding hints
+  /** Queues / shows a 'tutorial:hint'. A more important hint replaces the current one; others wait their turn. */
+  private pushHint(h: { id: string; text: string; duration?: number; priority?: number }): void {
+    if (!h || typeof h.text !== 'string') return;
+    const hint: Hint = { id: String(h.id ?? ''), text: h.text, duration: Math.max(2.5, Number(h.duration) || 5), priority: Number(h.priority) || 0 };
+    if (this.hintCur?.id === hint.id || this.hintQueue.some((q) => q.id === hint.id)) return;
+    if (hint.id === 'levelup') {
+      // the level-up tip is about the cards: it lives inline on the level-up screen instead of floating over them
+      this.levelTip = hint.text;
+      if (this.current === 'levelup') this.applyLevelTip();
+      return;
+    }
+    const onScreen = this.current === 'hud';
+    if (!this.hintCur && this.hintGap <= 0 && onScreen) return this.showHint(hint);
+    if (this.hintCur && hint.priority > this.hintCur.priority) {
+      // the interrupted hint comes back afterwards if it had barely been read
+      if (this.hintLeft > this.hintCur.duration * 0.6) this.hintQueue.unshift(this.hintCur);
+      return this.showHint(hint);
+    }
+    this.hintQueue.push(hint);
+    this.hintQueue.sort((a, b) => b.priority - a.priority);
+    if (this.hintQueue.length > 4) this.hintQueue.length = 4;
+  }
+
+  private showHint(h: Hint): void {
+    this.hintCur = h;
+    // reading time: the suggested duration, but never less than ~14 characters per second
+    this.hintLeft = Math.max(h.duration, 1.6 + h.text.length / 14);
+    const glyph = this.hintEl.querySelector<HTMLElement>('.hint-glyph')!;
+    if (h.id === 'move') {
+      glyph.className = 'hint-glyph hint-move';
+      glyph.innerHTML = `<span class="only-kbd hint-keys"><span>${kbd('W')}</span><span>${kbd('A')}${kbd('S')}${kbd('D')}</span></span><span class="only-pad">${icon('stick')}</span><span class="only-touch">${icon('touch')}</span>`;
+    } else {
+      glyph.className = `hint-glyph hint-${h.id}`;
+      glyph.innerHTML = icon(HINT_ICON[h.id] ?? 'sparkle');
+    }
+    this.hintEl.querySelector('.hint-text')!.textContent = h.text;
+    this.hintEl.classList.toggle('hint-urgent', h.priority >= 5);
+    this.hintEl.style.setProperty('--dur', `${this.hintLeft.toFixed(2)}s`);
+    this.hintEl.classList.remove('visible');
+    void this.hintEl.offsetWidth; // restart pop-in + timer bar
+    this.hintEl.classList.add('visible');
+    this.root.classList.add('hint-up');
+    this.game.audio.play('hover', { rate: 1.25, gain: 0.7 });
+  }
+
+  /** Counts the current hint down while the run is on screen (not while paused); then shows the next one. */
+  private tickHint(dt: number): void {
+    // hints run on the HUD only; over a choice screen they wait (never cover a decision)
+    const live = this.current === 'hud';
+    this.hintEl.classList.toggle('suppressed', !live);
+    if (!live) return;
+    if (this.hintCur) {
+      this.hintLeft -= dt;
+      if (this.hintLeft <= 0) {
+        this.hintCur = null;
+        this.hintGap = 0.6;
+        this.hintEl.classList.remove('visible');
+        this.root.classList.remove('hint-up');
+      }
+    } else if (this.hintGap > 0) {
+      this.hintGap -= dt;
+    } else if (this.hintQueue.length) {
+      this.showHint(this.hintQueue.shift()!);
+    }
+  }
+
+  /** Shows the pending level-up tip in place of the level-up subtitle (once). */
+  private applyLevelTip(): void {
+    const sub = this.screens.get('levelup')?.querySelector<HTMLElement>('.lu-sub');
+    if (!sub || !this.levelTip) return;
+    sub.className = 'lu-sub lu-tip';
+    sub.innerHTML = `<span class="lu-tip-tag">${icon('sparkle')} Tip</span>${esc(this.levelTip)}`;
+    this.levelTip = '';
+  }
+
+  private clearHints(): void {
+    this.levelTip = '';
+    if (!this.hintCur && !this.hintQueue.length) return;
+    this.hintCur = null;
+    this.hintQueue.length = 0;
+    this.hintGap = 0;
+    this.hintEl.classList.remove('visible');
+    this.root.classList.remove('hint-up');
   }
 
   // ------------------------------------------------------------------ menu
@@ -458,6 +666,7 @@ export class UI {
 
   private returnTo(scr: Screen): void {
     if (scr === 'pause') this.showPause();
+    else if (scr === 'setup') this.showSetup();
     else if (scr === 'settings') this.showSettings(this.settingsReturn);
     else this.showMenu();
   }
@@ -469,6 +678,8 @@ export class UI {
     let biomeSel = save.unlocked.includes(this.game.selectedBiome) || !BIOMES.find((b) => b.id === this.game.selectedBiome)?.unlock ? this.game.selectedBiome : 'biome_pines';
     const ownedChar = (id: string) => save.unlocked.includes(id);
     const ownedBiome = (b: (typeof BIOMES)[number]) => !b.unlock || save.unlocked.includes(b.unlock);
+    // first-run "how to play" card (once per save)
+    let intro = save.runs === 0 && Array.isArray(save.hintsSeen) && !save.hintsSeen.includes('ui-intro');
 
     const render = (focusSel?: string) => {
       this.screen('setup', (s) => {
@@ -508,8 +719,8 @@ export class UI {
             </span>
           </button>`;
         }).join('');
-        s.innerHTML = `
-          <div class="frame frame-wide frame-setup">
+        s.innerHTML = `${intro ? this.introCard() : ''}
+          <div class="frame frame-wide frame-setup ${intro ? 'has-intro' : ''}">
             ${this.head('Choose your Bearer', this.ashPill(save.ash))}
             <div class="frame-body">
               <div class="setup-top">
@@ -532,7 +743,7 @@ export class UI {
               ${this.prompts([['A', 'Enter', 'Select'], ['B', 'Esc', 'Back']])}
               <button class="btn foot-back" data-act="back-foot">${icon('back')}<span>Back</span></button>
               ${unlockBtn}
-              <button class="btn btn-primary btn-lg" data-act="start" ${ownedChar(save.selectedCharacter) ? '' : 'disabled'} ${focusSel ? '' : 'data-autofocus'}>${icon('fire')}<span>Light the Lantern</span></button>
+              <button class="btn btn-primary btn-lg" data-act="start" ${ownedChar(save.selectedCharacter) ? '' : 'disabled'} ${focusSel || intro ? '' : 'data-autofocus'}>${icon('fire')}<span>Light the Lantern</span></button>
             </footer>
           </div>`;
         s.querySelectorAll<HTMLElement>('[data-char]').forEach((b) =>
@@ -578,10 +789,21 @@ export class UI {
             });
           }),
         );
+        const introSeen = () => {
+          intro = false;
+          if (!save.hintsSeen.includes('ui-intro')) save.hintsSeen.push('ui-intro');
+          this.game.persist();
+        };
+        s.querySelector('[data-act=intro-ok]')?.addEventListener('click', () => {
+          introSeen();
+          render('[data-act=start]');
+        });
+        s.querySelector('[data-act=intro-controls]')?.addEventListener('click', () => this.showHowTo('setup'));
         const back = () => this.showMenu();
         s.querySelector('[data-act=back]')!.addEventListener('click', back);
         s.querySelector('[data-act=back-foot]')!.addEventListener('click', back);
         s.querySelector('[data-act=start]')!.addEventListener('click', () => {
+          if (intro) introSeen(); // the card never blocks starting
           this.game.selectedBiome = biomeSel;
           this.game.startRun();
         });
@@ -590,6 +812,24 @@ export class UI {
       if (focusSel) this.refocus('setup', focusSel);
     };
     render();
+  }
+
+  /** The short first-run "how to play" card shown over the setup screen. */
+  private introCard(): string {
+    const steps: [string, string, string][] = [
+      ['', 'Move', `<span class="only-kbd">${kbd('W')}${kbd('A')}${kbd('S')}${kbd('D')} or arrows</span><span class="only-pad">${pad('L-stick')}</span><span class="only-touch">Drag anywhere</span>`],
+      ['fire', 'Attacks are automatic', 'Your weapons fire on their own — just keep moving.'],
+      ['sparkle', 'Gather embers', 'Level up and choose gifts. Pair a MAX weapon with its relic to <b>evolve</b> it.'],
+      ['wick', 'Your light is your life', `Hits dim your lantern; oil restores it. Last until <b>${fmtTime(RUN_LENGTH)}</b> and defeat the master.`],
+    ];
+    return `<div class="intro-card" role="dialog" aria-labelledby="intro-t">
+      <div class="intro-head">${emblem()}<div><small>Before you set out</small><h3 id="intro-t">Your first vigil</h3></div></div>
+      <ol class="intro-steps">${steps.map(([ic, t, d], i) => `<li style="--i:${i}"><span class="badge badge-sm ${i === 0 ? 'badge-blue' : ''}">${ic ? icon(ic) : icon('stick')}</span><div><b>${t}</b><span>${d}</span></div></li>`).join('')}</ol>
+      <div class="intro-btns">
+        <button class="btn btn-small" data-act="intro-controls">${icon('gamepad')}<span>All controls</span></button>
+        <button class="btn btn-primary" data-act="intro-ok" data-autofocus>${icon('check')}<span>Got it</span></button>
+      </div>
+    </div>`;
   }
 
   private bearerStats(c: CharacterDef): [string, number, string][] {
@@ -751,6 +991,7 @@ export class UI {
             toggle('showFps', 'Show FPS');
         case 'gameplay':
           return seg('prompts', 'Button Prompts', [['auto', 'Auto'], ['keyboard', 'Keys'], ['gamepad', 'Pad'], ['touch', 'Touch']]) +
+            toggle('hints', 'Tutorial Hints', 'Short tips during your first vigils.') +
             toggle('confirmAbandon', 'Confirm Abandon', 'Ask before leaving a vigil.') +
             `<div class="setting"><div class="setting-label">Controls</div><button class="btn btn-small" data-act="controls">${icon('gamepad')}<span>View</span></button></div>`;
         case 'access':
@@ -855,6 +1096,7 @@ export class UI {
         <div class="hud-slots"><div class="slot-row slot-weapons"></div><div class="slot-row slot-relics"></div></div>
         <div class="hud-center">
           <div class="hud-timer">00:00</div>
+          <div class="dawn-track" aria-hidden="true"><span class="dt-moon">${icon('moon')}</span><span class="dt-bar"><i class="dt-fill"></i></span><span class="dt-sun">${icon('sun')}</span></div>
           <div class="boss-bar" aria-live="polite">
             <div class="boss-plate">${icon('crown')}<span class="boss-name"></span>${icon('crown')}</div>
             <div class="boss-track"><div class="boss-trail"></div><div class="boss-fill"></div><div class="boss-ticks"></div></div>
@@ -899,6 +1141,8 @@ export class UI {
       bossName: root.querySelector('.boss-name')!,
       bossSub: root.querySelector('.boss-sub')!,
       fps: root.querySelector('.hud-fps')!,
+      dawnTrack: root.querySelector('.dawn-track')!,
+      dawnFill: root.querySelector('.dt-fill')!,
     };
   }
 
@@ -969,6 +1213,9 @@ export class UI {
         h.timer.classList.toggle('urgent', urgent);
       }
       h.timer.classList.toggle('endless', !!run.endless);
+      // night progress toward dawn (moon → sun); hidden in the endless night
+      h.dawnFill.style.transform = `scaleX(${Math.min(1, run.elapsed / RUN_LENGTH).toFixed(3)})`;
+      h.dawnTrack.classList.toggle('off', !!run.endless || remaining <= 0);
     }
     if (run.kills !== hv.kills) {
       hv.kills = run.kills;
@@ -1060,10 +1307,13 @@ export class UI {
       pips = `<span class="uc-pips" aria-label="Level ${c.level} of ${max}">${pips}</span>`;
     }
     const wColor = c.kind.startsWith('weapon') || c.kind === 'evolution' ? getWeapon(c.id)?.color : undefined;
-    const lvText = c.kind === 'weapon-up' || (c.kind === 'passive' && c.level > 1) ? `Lv ${c.level - 1} → ${c.level}` : c.kind === 'evolution' && c.from ? `${getWeapon(c.from)?.name ?? ''} →` : '';
-    return `<button class="ucard ${r.cls}" data-i="${i}" ${i === 0 ? 'data-autofocus' : ''} style="--i:${i}${wColor !== undefined ? `;--wc:${hex(wColor)}` : ''}" ${interactive ? '' : 'tabindex="-1"'}>
+    const lvText = c.kind === 'weapon-up' || (c.kind === 'passive' && c.level > 1)
+      ? `Lv ${c.level - 1} → ${c.level >= max && max > 0 ? 'MAX' : c.level}`
+      : c.kind === 'evolution' && c.from ? `${getWeapon(c.from)?.name ?? ''} →` : '';
+    const noBanish = c.kind === 'heal' || c.kind === 'ash' || c.kind === 'special';
+    return `<button class="ucard ${r.cls} ${noBanish ? 'no-banish' : ''}" data-i="${i}" ${i === 0 ? 'data-autofocus' : ''} style="--i:${i}${wColor !== undefined ? `;--wc:${hex(wColor)}` : ''}" ${interactive ? '' : 'tabindex="-1"'}>
       <span class="uc-rays" aria-hidden="true"></span>
-      <span class="uc-ribbon">${r.label}</span>
+      <span class="uc-ribbon">${icon(r.shape, 'rar')}${r.label}</span>
       ${r.isNew ? '<span class="uc-new">NEW!</span>' : ''}
       ${interactive ? `<span class="uc-key"><span class="only-kbd">${kbd(String(i + 1))}</span><span class="only-pad">${pad('A')}</span></span>` : ''}
       <span class="uc-badge">${icon(c.icon)}</span>
@@ -1071,45 +1321,53 @@ export class UI {
       ${lvText ? `<span class="uc-lv">${lvText}</span>` : ''}
       ${pips}
       <span class="uc-desc">${c.description}</span>
-      <span class="uc-banish" aria-hidden="true">${icon('banish')} Banish</span>
+      <span class="uc-banish" aria-hidden="true">${icon(noBanish ? 'lock' : 'banish')} ${noBanish ? 'Cannot banish' : 'Banish'}</span>
     </button>`;
   }
 
   showLevelUp(choices: UpgradeChoice[], title = 'The flame grows'): void {
+    const mode = this.game.levelMode ?? 'levelup';
+    if (mode === 'dawn') return this.showDawn(choices, title);
     this.levelChoices = choices;
     const run = this.game.run;
-    const mode = this.game.levelMode ?? 'levelup';
     const isLevel = mode === 'levelup';
     if (!isLevel) this.banishMode = false;
     this.lockUntil = performance.now() + (motionReduced(this.game.save) ? 200 : 420);
+    const hint = (on: boolean) => (on ? 'Pick an offer to banish it for the rest of this vigil — a new one takes its place.' : run.skips > 0 ? 'Skipping grants +5 Ash.' : '');
     this.screen('levelup', (s) => {
-      s.classList.toggle('mode-dawn', mode === 'dawn');
       s.classList.toggle('banishing', this.banishMode);
-      const kicker = mode === 'dawn' ? 'Victory is yours' : `Level ${run.level}`;
-      const big = mode === 'dawn' ? title : 'Level Up!';
       const banishes = run.banishes ?? 0;
+      // only show the tools you still have; none at all → no action bar
+      const acts: string[] = [];
+      if (run.rerolls > 0) acts.push(`<button class="btn btn-small" data-act="reroll">${icon('reroll')}<span>Reroll</span><span class="count">${run.rerolls}</span><span class="only-kbd">${kbd('R')}</span><span class="only-pad">${pad('X')}</span></button>`);
+      if (banishes > 0) acts.push(`<button class="btn btn-small btn-danger ${this.banishMode ? 'on' : ''}" data-act="banish" aria-pressed="${this.banishMode}">${icon('banish')}<span>${this.banishMode ? 'Cancel' : 'Banish'}</span><span class="count">${banishes}</span><span class="only-kbd">${kbd('B')}</span><span class="only-pad">${pad('Y')}</span></button>`);
+      if (run.skips > 0) acts.push(`<button class="btn btn-small" data-act="skip">${icon('skip')}<span>Skip</span><span class="count">${run.skips}</span></button>`);
       s.innerHTML = `
         <div class="lu-burst" aria-hidden="true"></div>
         <div class="lu-wrap">
           <div class="lu-head">
-            <div class="lu-kicker">${kicker}</div>
-            ${bigTitle(big, 'lu-title')}
-            ${mode === 'dawn' ? '' : `<div class="lu-sub">${title}</div>`}
+            <div class="lu-kicker">Level ${run.level}</div>
+            ${bigTitle('Level Up!', 'lu-title')}
+            <div class="lu-sub">${title}</div>
           </div>
           <div class="lu-cards n${choices.length}">${choices.map((c, i) => this.choiceCard(c, i)).join('')}</div>
-          ${isLevel ? `<div class="lu-actions">
-            <button class="btn btn-small" data-act="reroll" ${run.rerolls > 0 ? '' : 'disabled'}>${icon('reroll')}<span>Reroll</span><span class="count">${run.rerolls}</span><span class="only-kbd">${kbd('R')}</span><span class="only-pad">${pad('X')}</span></button>
-            <button class="btn btn-small btn-danger ${this.banishMode ? 'on' : ''}" data-act="banish" ${banishes > 0 ? '' : 'disabled'} aria-pressed="${this.banishMode}">${icon('banish')}<span>${this.banishMode ? 'Cancel' : 'Banish'}</span><span class="count">${banishes}</span><span class="only-kbd">${kbd('B')}</span><span class="only-pad">${pad('Y')}</span></button>
-            <button class="btn btn-small" data-act="skip" ${run.skips > 0 ? '' : 'disabled'}>${icon('skip')}<span>Skip</span><span class="count">${run.skips}</span></button>
-          </div>
-          <div class="lu-hint">${this.banishMode ? 'Pick an offer to banish it for the rest of this vigil.' : 'Skipping grants +5 Ash.'}</div>` : ''}
+          ${acts.length ? `<div class="lu-actions">${acts.join('')}</div>` : ''}
+          <div class="lu-hint">${hint(this.banishMode)}</div>
         </div>`;
       s.querySelectorAll<HTMLElement>('[data-i]').forEach((b) =>
         b.addEventListener('click', () => {
           if (performance.now() < this.lockUntil) return;
           const i = Number(b.dataset.i);
           if (this.banishMode) {
+            if (b.classList.contains('no-banish')) {
+              this.game.audio.play('deny');
+              b.classList.remove('shake');
+              void b.offsetWidth;
+              b.classList.add('shake');
+              return;
+            }
             this.banishMode = false;
+            this.game.audio.play('back');
             this.game.banishUpgrade(i);
           } else this.game.chooseUpgrade(i);
         }),
@@ -1126,44 +1384,176 @@ export class UI {
         b.classList.toggle('on', this.banishMode);
         b.setAttribute('aria-pressed', String(this.banishMode));
         b.querySelector('span')!.textContent = this.banishMode ? 'Cancel' : 'Banish';
-        s.querySelector('.lu-hint')!.textContent = this.banishMode ? 'Pick an offer to banish it for the rest of this vigil.' : 'Skipping grants +5 Ash.';
-        this.refocus('levelup', '[data-i="0"]');
+        s.querySelector('.lu-hint')!.textContent = hint(this.banishMode);
+        this.refocus('levelup', '.ucard:not(.no-banish)');
       });
     });
     this.show('levelup');
+    this.applyLevelTip();
     this.game.audio.play('hover');
   }
 
-  /** Reliquary reveal (Game feature-detects this). Contents were already applied; any input continues. */
+  // ------------------------------------------------------------------ reliquary reveal
+  /**
+   * Reliquary reveal (Game feature-detects this). The contents were already applied by Game; this is celebration only.
+   * The chest bursts open, items fly out one by one with a rarity glow; an evolution gets a golden banner.
+   * Space / Enter / click / pad A first finishes the animation, then continues (Game also auto-closes on a timer).
+   */
   showChest(items: UpgradeChoice[], evolved: boolean): void {
+    // prefer Game.lastChest when present (what the chest actually gave), fall back to the choices passed in
+    const lc = (this.game as unknown as { lastChest?: unknown }).lastChest as { items?: UpgradeChoice[]; ash?: number } | UpgradeChoice[] | undefined;
+    const given = Array.isArray(lc) ? lc : Array.isArray(lc?.items) && lc!.items!.length ? lc!.items! : items;
+    const bonusAsh = !Array.isArray(lc) && typeof lc?.ash === 'number' ? lc.ash : 0;
+    const list = mergeChest(given.length ? given : items);
+    const evo = list.find((x) => x.c.kind === 'evolution');
+    evolved = evolved || !!evo;
     this.levelChoices = items;
-    this.lockUntil = performance.now() + 300;
-    const dur = evolved ? 4.5 : 2.8;
-    // the evolution toast fired a moment ago (weapon:evolved) — the reveal replaces it
+    const calm = motionReduced(this.game.save);
+    const T0 = calm ? 0 : 0.75; // lid bursts open at ~0.55s; first item leaves the chest right after
+    const STEP = calm ? 0 : 0.34;
+    const revealEnd = T0 + Math.max(0, list.length - 1) * STEP + (calm ? 0 : 0.55);
+    this.chestRevealAt = performance.now() + revealEnd * 1000;
+    this.lockUntil = performance.now() + 250;
+    /** How long the reveal should stay up (Game may honour this; see chestHold). The drain bar shows Game's own timer. */
+    this.chestHold = Math.max(evolved ? 4.5 : 2.8, revealEnd + 1.4);
+    const dur = this.chestHold;
     if (evolved) this.toastEl.classList.remove('visible');
-    this.screen('levelup', (s) => {
-      s.classList.add('mode-chest');
+    this.clearChestTimers();
+
+    const card = (it: ChestItem, i: number): string => {
+      const c = it.c;
+      const r = rarityOf(c);
+      let max = 0;
+      if (c.kind === 'weapon-up' || c.kind === 'weapon-new') max = getWeapon(c.id)?.maxLevel ?? 0;
+      else if (c.kind === 'passive') max = this.game.passiveDef(c.id)?.maxLevel ?? 0;
+      const lv = c.kind === 'evolution' ? '' : c.level > 0 ? `Lv ${Math.max(0, it.from)} → ${max > 0 && it.to >= max ? 'MAX' : it.to}` : '';
+      const fromW = c.kind === 'evolution' && c.from ? getWeapon(c.from) : undefined;
+      const delay = (T0 + i * STEP).toFixed(2);
+      return `<div class="ch-item ${r.cls} ${c.kind === 'evolution' ? 'ch-evo' : ''}" style="--d:${delay}s;--n:${i}" data-nav tabindex="-1">
+        <span class="ch-glow" aria-hidden="true"></span>
+        ${c.kind === 'evolution' ? '<span class="uc-rays" aria-hidden="true"></span>' : ''}
+        <span class="uc-ribbon">${icon(r.shape, 'rar')}${c.kind === 'evolution' ? 'Evolved' : r.label}</span>
+        ${it.count > 1 ? `<span class="ch-count">×${it.count}</span>` : ''}
+        ${fromW ? `<span class="ch-from"><span class="badge badge-sm badge-tint" style="--c:${hex(fromW.color)}">${icon(fromW.icon)}</span>${icon('next')}</span>` : ''}
+        <span class="uc-badge">${icon(c.icon)}</span>
+        <span class="uc-name">${c.name}</span>
+        ${lv ? `<span class="uc-lv">${lv}</span>` : ''}
+        <span class="uc-desc">${c.description}</span>
+      </div>`;
+    };
+    this.screen('chest', (s) => {
       s.classList.toggle('chest-evo', evolved);
+      s.style.setProperty('--reveal', `${revealEnd.toFixed(2)}s`);
+      const banner = evo
+        ? `<div class="ch-banner" style="--d:${T0.toFixed(2)}s"><span class="ch-banner-ribbon">${icon('sparkle')}<span>${esc(getWeapon(evo.c.from ?? '')?.name ?? '')}</span>${icon('next')}<span>${esc(evo.c.name)}</span>${icon('sparkle')}</span>
+            <span class="ch-banner-sub">Your weapon has evolved</span></div>`
+        : '';
       s.innerHTML = `
-        <div class="lu-burst" aria-hidden="true"></div>
-        <div class="lu-wrap">
+        <div class="lu-burst ch-burst" aria-hidden="true"></div>
+        <div class="ch-wrap">
           <div class="lu-head">
             <div class="lu-kicker">${icon('sparkle')} Reliquary ${icon('sparkle')}</div>
-            ${bigTitle(evolved ? 'Evolution!' : 'Treasure!', 'lu-title')}
+            ${bigTitle(evolved ? 'Evolution!' : 'Treasure!', 'lu-title ch-title')}
           </div>
-          <div class="lu-cards n${items.length}">${items.map((c, i) => this.choiceCard(c, i, false)).join('')}</div>
-          <div class="lu-actions">
-            <button class="btn btn-primary chest-go" data-act="continue" data-autofocus style="--dur:${dur}s">${icon('check')}<span>Continue</span><span class="only-kbd">${kbd('Space')}</span><span class="only-pad">${pad('A')}</span><i class="chest-timer"></i></button>
+          ${banner}
+          <div class="ch-items n${list.length}">${list.map(card).join('')}</div>
+          <div class="ch-chest">${reliquary()}</div>
+          ${bonusAsh > 0 ? `<div class="ch-ash">${icon('ash')} +${bonusAsh} Ash</div>` : ''}
+          <div class="ch-actions">
+            <button class="btn btn-primary chest-go" data-act="continue" data-autofocus style="--dur:${dur.toFixed(2)}s">${icon('check')}<span>Continue</span><span class="only-kbd">${kbd('Space')}</span><span class="only-pad">${pad('A')}</span><i class="chest-timer"></i></button>
           </div>
         </div>`;
-      const go = () => {
+      s.addEventListener('click', (e) => {
+        e.stopPropagation(); // the root click sound fires below instead
         if (performance.now() < this.lockUntil) return;
+        if (!this.chestRevealed()) {
+          this.finishChestReveal();
+          return;
+        }
+        this.game.audio.play('confirm');
         this.game.closeChest();
-      };
-      s.querySelector('[data-act=continue]')!.addEventListener('click', go);
-      s.querySelectorAll<HTMLElement>('[data-i]').forEach((b) => b.addEventListener('click', go));
+      });
     });
-    this.show('levelup');
+    this.show('chest');
+    this.chestBar = this.screens.get('chest')!.querySelector<HTMLElement>('.chest-timer');
+    this.chestBar0 = 0;
+    // a soft chime as each item lands
+    if (!calm) {
+      list.forEach((it, i) => {
+        this.chestTimers.push(window.setTimeout(() => {
+          if (this.current !== 'chest') return;
+          this.game.audio.play(it.c.kind === 'evolution' ? 'levelup' : 'pickup', { rate: 1 + i * 0.12, gain: 0.8 });
+        }, (T0 + i * STEP + 0.38) * 1000));
+      });
+    }
+  }
+
+  private chestRevealed(): boolean {
+    return performance.now() >= this.chestRevealAt;
+  }
+
+  /** Skips the reveal animation: everything snaps to its final pose. */
+  private finishChestReveal(): void {
+    this.chestRevealAt = 0;
+    this.lockUntil = performance.now() + 200;
+    this.clearChestTimers();
+    this.screens.get('chest')?.classList.add('ch-done');
+  }
+
+  private clearChestTimers(): void {
+    for (const t of this.chestTimers) window.clearTimeout(t);
+    this.chestTimers.length = 0;
+  }
+
+  // ------------------------------------------------------------------ dawn choice
+  /** After the night's master falls: greet the dawn (victory, end the run) or keep burning into the endless night. */
+  showDawn(choices: UpgradeChoice[], info?: string | Partial<DawnInfoLike>): void {
+    const di: Partial<DawnInfoLike> = typeof info === 'object' && info ? info : {};
+    const title = di.bossName ? `${di.bossName} has fallen` : typeof info === 'string' ? info : 'The master has fallen';
+    this.levelChoices = choices;
+    this.banishMode = false;
+    this.lockUntil = performance.now() + (motionReduced(this.game.save) ? 300 : 900);
+    const run = this.game.run;
+    const biome = BIOMES.find((b) => b.id === this.game.selectedBiome);
+    const stars = Array.from({ length: 18 }, (_, i) => {
+      const r = (n: number) => ((Math.sin(i * 91.7 + n * 47.3) * 43758.5453) % 1 + 1) % 1;
+      return `<i style="left:${(r(1) * 100).toFixed(1)}%;top:${(r(2) * 45).toFixed(1)}%;--s:${(2 + r(3) * 3).toFixed(1)}px;--dl:${(r(4) * 1.5).toFixed(2)}s"></i>`;
+    }).join('');
+    this.screen('dawn', (s) => {
+      const cards = choices.map((c, i) => {
+        const isDawn = c.id !== 'endless';
+        return `<button class="dawn-card ${isDawn ? 'dc-dawn' : 'dc-night'}" data-i="${i}" ${isDawn ? 'data-autofocus' : ''} style="--i:${i}">
+          <span class="uc-key"><span class="only-kbd">${kbd(String(i + 1))}</span><span class="only-pad">${pad('A')}</span></span>
+          <span class="dc-orb">${icon(isDawn ? 'sun' : 'moon')}</span>
+          <span class="dc-name">${esc(c.name)}</span>
+          <span class="dc-desc">${c.description}</span>
+          <span class="dc-tag">${isDawn ? `${icon('ash')} Carry home ${di.ashIfDawn ? `<b>${Math.round(di.ashIfDawn).toLocaleString()}</b>` : 'your'} Ash` : `${icon('crown')} Victory kept · bonus Ash`}</span>
+        </button>`;
+      }).join('');
+      s.innerHTML = `
+        <div class="dawn-sky" aria-hidden="true"><div class="dawn-stars">${stars}</div><div class="dawn-sun"></div><div class="lu-burst dawn-rays"></div>${dawnHills()}</div>
+        <div class="dw-wrap">
+          <div class="lu-head">
+            <div class="lu-kicker dw-kicker">${icon('crown')} ${esc(title)} ${icon('crown')}</div>
+            ${bigTitle('Dawn is Breaking', 'lu-title dw-title')}
+            <div class="lu-sub">You carried the light through ${esc(biome?.name ?? 'the night')}. How does your vigil end?</div>
+          </div>
+          <div class="dw-chips">
+            <span class="chip">${icon('timer')}<b>${fmtTime(run.elapsed)}</b></span>
+            <span class="chip">${icon('star')}<small>Lv</small><b>${run.level}</b></span>
+            <span class="chip">${icon('skull')}<b>${run.kills.toLocaleString()}</b></span>
+          </div>
+          <div class="dw-cards">${cards}</div>
+          ${this.prompts([['D-pad', '←→', 'Choose'], ['A', 'Enter', 'Confirm']])}
+        </div>`;
+      s.querySelectorAll<HTMLElement>('[data-i]').forEach((b) =>
+        b.addEventListener('click', () => {
+          if (performance.now() < this.lockUntil) return;
+          this.game.chooseUpgrade(Number(b.dataset.i));
+        }),
+      );
+    });
+    this.show('dawn');
   }
 
   // ------------------------------------------------------------------ pause
@@ -1184,13 +1574,41 @@ export class UI {
         ['luck', 'Crit', `${Math.round(st.critChance * st.luck * 100)}%`],
         ['twin', 'Amount', `+${st.amount}`],
       ];
-      const build = [
-        ...run.weapons.map((w) => `<div class="build-item"><span class="badge badge-sm badge-tint" style="--c:${hex(w.def.color)}">${icon(w.def.icon)}</span><span>${w.def.name}</span><b>${w.level >= w.def.maxLevel ? 'MAX' : `Lv ${w.level}`}</b></div>`),
-        ...Array.from(run.passives.entries()).map(([id, lv]) => {
-          const d = this.game.passiveDef(id);
-          return `<div class="build-item relic"><span class="badge badge-sm badge-blue">${icon(d?.icon ?? 'star')}</span><span>${d?.name ?? id}</span><b>${d && lv >= d.maxLevel ? 'MAX' : `Lv ${lv}`}</b></div>`;
-        }),
-      ].join('');
+      const evolved = new Set(run.evolutions ?? []);
+      const lvPips = (lv: number, max: number) => {
+        let p = '';
+        for (let k = 1; k <= max; k++) p += `<i class="${k <= lv ? 'on' : ''}"></i>`;
+        return `<span class="bi-pips" aria-label="Level ${lv} of ${max}">${p}</span>`;
+      };
+      const weapons = run.weapons.map((w) => {
+        const d = w.def;
+        const isEvo = evolved.has(d.id) || !!d.hidden;
+        const max = w.level >= d.maxLevel;
+        let note = '';
+        if (isEvo) note = `<span class="bi-note evo">${icon('sparkle')} Evolved form</span>`;
+        else if (d.evolvesWith && d.evolvesInto) {
+          const relic = this.game.passiveDef(d.evolvesWith);
+          const into = getWeapon(d.evolvesInto)?.name ?? '?';
+          const has = run.passives.has(d.evolvesWith);
+          note = max && has
+            ? `<span class="bi-note ready">${icon('chest')} Ready! Open a reliquary → ${esc(into)}</span>`
+            : `<span class="bi-note">${icon('sparkle')} ${max ? `${icon('check')}MAX` : 'MAX'} + <span class="${has ? 'have' : ''}">${has ? icon('check') : ''}${esc(relic?.name ?? d.evolvesWith)}</span> → ${esc(into)}</span>`;
+        }
+        return `<div class="build-item ${isEvo ? 'is-evo' : ''}"><span class="badge badge-sm badge-tint" style="--c:${hex(d.color)}">${icon(d.icon)}</span>
+          <span class="bi-main"><span class="bi-name">${d.name}</span>${note}</span>
+          <span class="bi-lv">${max ? '<b class="bi-max">MAX</b>' : `<b>Lv ${w.level}</b>`}${lvPips(w.level, d.maxLevel)}</span></div>`;
+      });
+      const relics = Array.from(run.passives.entries()).map(([id, lv]) => {
+        const d = this.game.passiveDef(id);
+        const max = d?.maxLevel ?? 5;
+        const pair = run.weapons.find((w) => w.def.evolvesWith === id && !evolved.has(w.def.id));
+        const note = pair ? `<span class="bi-note">${icon('sparkle')} Evolves ${esc(pair.def.name)}</span>` : '';
+        return `<div class="build-item relic"><span class="badge badge-sm badge-blue">${icon(d?.icon ?? 'star')}</span>
+          <span class="bi-main"><span class="bi-name">${d?.name ?? id}</span>${note}</span>
+          <span class="bi-lv">${lv >= max ? '<b class="bi-max">MAX</b>' : `<b>Lv ${lv}</b>`}${lvPips(lv, max)}</span></div>`;
+      });
+      const build = (weapons.length ? `<div class="build-sub">${icon('rar-weapon')} Weapons <em>${run.weapons.length}/${run.maxWeapons}</em></div>${weapons.join('')}` : '') +
+        (relics.length ? `<div class="build-sub relic">${icon('rar-relic')} Relics <em>${run.passives.size}/${run.maxPassives}</em></div>${relics.join('')}` : '');
       s.innerHTML = `
         <div class="frame pause-frame">
           <div class="pause-left">

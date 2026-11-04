@@ -336,8 +336,8 @@ describe('Game state machine: boss & dawn', () => {
   });
 
   // BUG-QA-001 (S2): the dawn timer is not tied to the run. Killing the boss, dying and pressing "Again"
-  // within 2.2 s pops the dawn choice in the NEW run (instant victory). Flip to `it` when Game.ts is fixed.
-  it.fails('bossKilled_thenNewRunWithin2s_dawnDoesNotLeakIntoNewRun', () => {
+  // within 2.2 s pops the dawn choice in the NEW run (instant victory). Fixed in Sprint 2 — regression guard.
+  it('bossKilled_thenNewRunWithin2s_dawnDoesNotLeakIntoNewRun', () => {
     const game = newGame();
     game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
     game.endRun(true);
@@ -349,7 +349,7 @@ describe('Game state machine: boss & dawn', () => {
 
   // BUG-QA-002 (S2): if the game is paused when the 2.2 s dawn timer fires, dawnPending is set but only
   // afterChoice/closeChest consume it — after unpausing the dawn choice never appears until the next level-up.
-  it.fails('bossKilled_pausedWhenTimerFires_dawnAppearsAfterResume', () => {
+  it('bossKilled_pausedWhenTimerFires_dawnAppearsAfterResume', () => {
     const game = newGame();
     game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
     game.togglePause();
@@ -362,8 +362,8 @@ describe('Game state machine: boss & dawn', () => {
 
 describe('Game state machine: guards', () => {
   // BUG-QA-003 (S4): skipUpgrade/rerollUpgrades do not check state === 'levelup'; a stray UI/gamepad activation
-  // while playing burns the skip (+5 Ash) or a reroll. Flip to `it` when Game.ts is fixed.
-  it.fails('skipUpgrade_whilePlaying_ignored', () => {
+  // while playing burns the skip (+5 Ash) or a reroll. Fixed in Sprint 2 — regression guard.
+  it('skipUpgrade_whilePlaying_ignored', () => {
     const game = newGame();
     const skips = game.run.skips;
     game.skipUpgrade();
@@ -379,5 +379,239 @@ describe('Game state machine: guards', () => {
     expect(internals(game).pendingChoices.length).toBeGreaterThan(0);
     game.chooseUpgrade(0);
     expect(game.state).toBe('playing');
+  });
+});
+
+// ------------------------------------------------------------------ Sprint 2 (gameplay agent)
+describe('Game S2: onboarding hints', () => {
+  const collect = (game: Priv) => {
+    const ids: string[] = [];
+    game.events.on('tutorial:hint', ({ id }) => ids.push(id));
+    return ids;
+  };
+  /** One frame that advances the simulation by `seconds` (timeScale substeps). */
+  const advance = (game: Priv, seconds: number) => {
+    game.debug.timeScale = seconds / 0.05;
+    internals(game).last = performance.now() - 1000;
+    tick(game);
+    game.debug.timeScale = 1;
+  };
+
+  it('freshSave_runStart_moveHintAfterDelay', () => {
+    const game = newGame();
+    const ids = collect(game);
+    advance(game, 1);
+    expect(ids).toContain('move');
+  });
+
+  it('freshSave_firstHit_damageHintOnce', () => {
+    const game = newGame();
+    const ids = collect(game);
+    game.events.emit('player:damaged', { amount: 5 });
+    game.events.emit('player:damaged', { amount: 5 });
+    expect(ids.filter((i) => i === 'damage')).toHaveLength(1);
+    expect(game.save.hintsSeen).toContain('damage');
+  });
+
+  it('afterTwoRuns_noHints', () => {
+    const game = newGame();
+    game.save.runs = 2;
+    game.startRun();
+    const ids = collect(game);
+    game.events.emit('player:damaged', { amount: 5 });
+    advance(game, 1);
+    expect(ids).toEqual([]);
+  });
+
+  it('firstLevelUp_emitsLevelUpHint', () => {
+    const game = newGame();
+    const ids = collect(game);
+    game.run.addXp(game.run.xpToNext);
+    tick(game);
+    expect(game.state).toBe('levelup');
+    expect(ids).toContain('levelup');
+  });
+});
+
+describe('Game S2: UI API', () => {
+  it('chestOpened_lastChestExposesAppliedItems', () => {
+    const game = newGame();
+    expect(game.lastChest).toBeNull();
+    game.events.emit('chest:opened', {});
+    expect(game.levelMode).toBe('chest');
+    expect(game.lastChest?.items.length).toBeGreaterThan(0);
+    expect(game.lastChest?.evolved).toBe(false);
+    expect(game.chestTimeLeft).toBeGreaterThan(0);
+    game.closeChest();
+    expect(game.state).toBe('playing');
+    expect(game.chestTimeLeft).toBe(0);
+  });
+
+  it('resolveDawn_whilePlaying_ignored', () => {
+    const game = newGame();
+    game.resolveDawn('dawn');
+    expect(game.state).toBe('playing');
+  });
+
+  it('dawnChoice_lastDawnDescribesTheFallenMaster', () => {
+    const game = newGame();
+    game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
+    vi.advanceTimersByTime(2300);
+    expect(game.levelMode).toBe('dawn');
+    expect(game.lastDawn?.bossName).toBe('The Hollow Stag');
+    expect(game.lastDawn?.ashIfDawn).toBeGreaterThan(0);
+    game.resolveDawn('dawn');
+    expect(game.state).toBe('gameover');
+    expect(game.save.victories).toBe(1);
+  });
+
+  it('victoryOnPines_unlocksTheMarsh', () => {
+    const game = newGame();
+    game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
+    vi.advanceTimersByTime(2300);
+    game.resolveDawn('dawn');
+    expect(game.save.unlocked).toContain('biome_marsh');
+  });
+
+  it('endless_afterDawnChoice_keepsPlayingAndCountsEndlessTime', () => {
+    const game = newGame();
+    game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
+    vi.advanceTimersByTime(2300);
+    game.resolveDawn('endless');
+    expect(game.state).toBe('playing');
+    game.debug.timeScale = 20;
+    internals(game).last = performance.now() - 1000;
+    tick(game);
+    expect(game.run.endlessTime).toBeGreaterThan(0.5);
+    game.player.dead = true;
+    tick(game);
+    expect(game.state).toBe('gameover');
+    expect(game.save.victories).toBe(1);
+  });
+});
+
+describe('Game S2: timeScale substeps (BUG-QA-009)', () => {
+  it('timeScaleAboveOne_simulatesInSmallSteps', () => {
+    const game = newGame();
+    const steps: number[] = [];
+    const g = game as unknown as { updateRun(dt: number): void };
+    const orig = g.updateRun.bind(game);
+    g.updateRun = (dt: number) => { steps.push(dt); orig(dt); };
+    game.debug.timeScale = 6;
+    internals(game).last = performance.now() - 1000;
+    tick(game);
+    expect(steps.length).toBeGreaterThan(5);
+    for (const s of steps) expect(s).toBeLessThanOrEqual(1 / 30 + 1e-9);
+    expect(steps.reduce((a, b) => a + b, 0)).toBeCloseTo(0.3, 5);
+  });
+});
+
+// ------------------------------------------------------------------ Sprint 2 (QA)
+describe('Game S2 QA: chest / dawn ordering', () => {
+  it('chestOpen_whenDawnTimerFires_dawnFollowsContinue', () => {
+    const game = newGame();
+    game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
+    game.events.emit('chest:opened', {});
+    vi.advanceTimersByTime(2300);
+    expect(game.levelMode).toBe('chest'); // never yanked out from under the reveal
+    game.closeChest();
+    expect(game.state).toBe('levelup');
+    expect(game.levelMode).toBe('dawn');
+  });
+
+  it('skipUpgrade_onReliquary_continuesWithoutSpendingSkip', () => {
+    const game = newGame();
+    const skips = game.run.skips;
+    game.events.emit('chest:opened', {});
+    game.skipUpgrade();
+    expect(game.state).toBe('playing');
+    expect(game.run.skips).toBe(skips);
+  });
+
+  it('rerollAndBanish_onReliquaryOrDawn_ignored', () => {
+    const game = newGame();
+    const r = game.run.rerolls;
+    const b = game.run.banishes;
+    game.events.emit('chest:opened', {});
+    game.rerollUpgrades();
+    game.banishUpgrade(0);
+    expect(game.levelMode).toBe('chest');
+    game.closeChest();
+    game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
+    vi.advanceTimersByTime(2300);
+    game.rerollUpgrades();
+    game.banishUpgrade(0);
+    expect(game.levelMode).toBe('dawn');
+    expect([game.run.rerolls, game.run.banishes]).toEqual([r, b]);
+  });
+
+  it('dawnChoice_digitOne_greetsTheDawnVictorious', () => {
+    const game = newGame();
+    game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
+    vi.advanceTimersByTime(2300);
+    press(game, 'Digit1');
+    expect(game.state).toBe('gameover');
+    expect(game.save.victories).toBe(1);
+  });
+
+  it('bossKilled_thenToMenuAndNewRun_noDawnInNewRun', () => {
+    const game = newGame();
+    game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
+    game.toMenu();
+    game.startRun();
+    vi.advanceTimersByTime(2300);
+    expect(game.state).toBe('playing');
+    expect(game.lastDawn).toBeNull();
+  });
+
+  it('endless_secondBossKilled_noSecondDawnChoice', () => {
+    const game = newGame();
+    game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
+    vi.advanceTimersByTime(2300);
+    game.resolveDawn('endless');
+    game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
+    vi.advanceTimersByTime(2300);
+    tick(game);
+    expect(game.state).toBe('playing');
+    expect(game.run.bossesKilled).toBe(2);
+  });
+
+  it('startRun_afterChestAndDawn_resetsRevealState', () => {
+    const game = newGame();
+    game.events.emit('chest:opened', {});
+    game.closeChest();
+    game.events.emit('boss:killed', { defId: 'boss_hollow_stag' });
+    vi.advanceTimersByTime(2300);
+    game.resolveDawn('dawn');
+    game.startRun();
+    expect([game.lastChest, game.lastDawn, game.levelMode, game.run.endless]).toEqual([null, null, 'levelup', false]);
+  });
+});
+
+describe('Game S2 QA: settings', () => {
+  // BUG-QA-007 game side: an unknown tier never reaches the renderer from Settings either.
+  it('applySettings_unknownQuality_coercedBeforeRenderer', () => {
+    const game = newGame();
+    const seen: string[] = [];
+    (game.renderer as unknown as { setQuality(q: string): void }).setQuality = (q: string) => seen.push(q);
+    (game.save.settings as { quality: string }).quality = 'ultra';
+    game.applySettings();
+    // the renderer must never see the unknown tier (BUG-QA-011: no call at all when the coerced tier is already applied)
+    expect(seen.every((q) => q === 'high')).toBe(true);
+    expect(game.save.settings.quality).toBe('high');
+  });
+
+  // BUG-QA-011 (S3, src/game/Game.ts): every Settings change (each volume-slider input event, every toggle) calls
+  // applySettings -> renderer.setQuality, which rebuilds the tier (shadow maps, post targets, resize) AND resets the
+  // automatic quality fallback. Pinned until Game only calls setQuality when the tier actually changes.
+  it('applySettings_volumeChangeOnly_doesNotReapplyQualityTier', () => {
+    const game = newGame();
+    let calls = 0;
+    (game.renderer as unknown as { setQuality(q: string): void }).setQuality = () => calls++;
+    game.save.settings.musicVolume = 0.3;
+    game.applySettings();
+    game.save.settings.musicVolume = 0.2;
+    game.applySettings();
+    expect(calls).toBe(0);
   });
 });

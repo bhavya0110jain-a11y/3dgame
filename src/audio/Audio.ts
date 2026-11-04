@@ -9,9 +9,18 @@
  *   - voice limiting, round-robin variants, pitch/pan jitter and density attenuation for high-rate SFX
  *   - low-light heartbeat / breathing, XP-combo pitch ladder
  * Public API (used by Game/UI): unlock, play, startMusic, stopMusic, setVolumes, setIntensity
- * (+ playWeapon, setLight, bossDefeated).
+ * (+ playWeapon, setLight, bossDefeated, attach, setPaused).
+ *
+ * Memory policy (decoded PCM is float32 — ~0.38 MB per stereo second at 48 kHz):
+ *   - music cues are decoded at MUSIC_RATE (32 kHz), ambience at AMB_RATE (24 kHz) through an OfflineAudioContext;
+ *     SFX stay at the context rate (they are short and mostly mono already)
+ *   - only the cue that is playing is decoded: the boss theme is decoded when the boss is announced
+ *     ('boss:warning') or arrives, run stems are released during the boss fight and on the menu, stingers are
+ *     decoded on demand and released after they play
+ *   - encoded Ogg bytes (~3 MB total) stay cached so any cue can be re-decoded quickly
  */
 import { SFX_FILES, MUSIC_FILES, type MusicFile } from './audioManifest';
+import type { EventBus, GameEvents } from '../core/EventBus';
 
 export type SfxName =
   // legacy names (kept for existing callers)
@@ -127,6 +136,14 @@ const MUSIC_TRIM = 2.2;
 const SFX_TRIM = 2.4;
 const AMB_TRIM = 0.75;
 const BASE_URL = `${import.meta.env.BASE_URL ?? '/'}audio/`;
+/** Decode rate for music cues (Nyquist 16 kHz — transparent on the synth score, 1/3 less memory than 48 kHz). */
+const MUSIC_RATE = 32000;
+/** Decode rate for the night ambience bed (wind + insects under the music filter). */
+const AMB_RATE = 24000;
+/** music cue key -> decode sample rate (anything else decodes at the context rate) */
+const CUE_RATE: Record<string, number> = { run: MUSIC_RATE, boss: MUSIC_RATE, menu: MUSIC_RATE, victory: MUSIC_RATE, defeat: MUSIC_RATE, ambience: AMB_RATE };
+const FILE_RATE = new Map<string, number>();
+for (const [key, cues] of Object.entries(MUSIC_FILES)) for (const m of cues) if (CUE_RATE[key]) FILE_RATE.set(m.file, CUE_RATE[key]);
 
 interface Voice {
   name: string;
@@ -184,6 +201,11 @@ export class AudioManager {
   private intensitySmooth = 0;
   private lastIntensityCall = 0;
   private paused = false;
+  /** Explicit pause state (setPaused / attach getter); null = fall back to the setIntensity-silence heuristic. */
+  private pausedExplicit: boolean | null = null;
+  private pausedGetter: (() => boolean) | null = null;
+  private attached = false;
+  private unsubs: (() => void)[] = [];
   private light = 1;
   private nextBeat = 0;
   private nextBreath = 0;
@@ -266,10 +288,16 @@ export class AudioManager {
     for (const k of ['ui_hover', 'ui_click', 'ui_confirm', 'ui_back']) for (const f of SFX_FILES[k] ?? []) void this.decode(f);
     for (const m of MUSIC_FILES.menu ?? []) void this.decode(m.file);
     for (const files of Object.values(SFX_FILES)) for (const f of files) void this.decode(f);
-    for (const k of ['ambience', 'victory', 'defeat']) for (const m of MUSIC_FILES[k] ?? []) void this.decode(m.file);
+    for (const m of MUSIC_FILES.ambience ?? []) void this.decode(m.file);
     this.tickTimer = window.setInterval(() => this.tick(), 100);
     c.addEventListener?.('statechange', () => {
       if (c.state === 'running' && this.mode && !this.cue) this.startMusic(this.mode, true);
+    });
+    // a hidden tab makes no sound and burns no audio thread (the game pauses itself as well)
+    document.addEventListener?.('visibilitychange', () => {
+      if (!this.ctx) return;
+      if (document.hidden) void this.ctx.suspend?.();
+      else void this.ctx.resume?.();
     });
   }
 
@@ -296,6 +324,67 @@ export class AudioManager {
   setIntensity(v: number): void {
     this.intensity = Math.max(0, Math.min(1, v));
     this.lastIntensityCall = performance.now();
+  }
+
+  /**
+   * Explicit pause/resume (pause menu, level-up and reliquary screens): muffles and lowers the run music.
+   * Once called, the setIntensity-silence heuristic is no longer used.
+   */
+  setPaused(paused: boolean): void {
+    this.pausedExplicit = paused;
+  }
+
+  /**
+   * Subscribes the audio layer to gameplay events for the cues Game does not trigger itself (elite arrival, the
+   * boss warning, achievements, run end → memory release). `isPaused` (optional) is polled at 10 Hz for the pause
+   * muffle. Idempotent; returns an unsubscribe function.
+   *
+   * @example game.audio.attach(game.events, () => game.state === 'paused' || game.state === 'levelup');
+   */
+  attach(events: EventBus, isPaused?: () => boolean): () => void {
+    this.detach();
+    this.attached = true;
+    if (isPaused) this.pausedGetter = isPaused;
+    const on = <K extends keyof GameEvents>(k: K, fn: (p: GameEvents[K]) => void) => this.unsubs.push(events.on(k, fn));
+    on('elite:spawned', () => this.play('elite'));
+    on('boss:spawned', () => this.preloadCue('boss'));
+    on('achievement:unlocked', () => this.play('confirm', { rate: 1.19, gain: 0.8 }));
+    on('run:started', () => {
+      this.pickupCombo = 0;
+      this.pausedExplicit = null;
+    });
+    on('run:ended', () => {
+      // after the stinger has had time to start: drop the run/boss PCM (the menu re-decodes its own cue)
+      window.setTimeout(() => {
+        if (this.mode === null || this.mode === 'menu') {
+          this.release('run');
+          this.release('boss');
+        }
+      }, 2500);
+    });
+    // 'boss:warning' (Director, ~20 s before the master arrives): warning toll + decode the boss theme in time.
+    // Typed loosely so this works whether or not the event is declared yet.
+    const loose = events as unknown as { on(t: string, fn: () => void): () => void };
+    this.unsubs.push(
+      loose.on('boss:warning', () => {
+        this.play('warn');
+        this.preloadCue('boss');
+      }),
+    );
+    return () => this.detach();
+  }
+
+  private detach(): void {
+    for (const u of this.unsubs) u();
+    this.unsubs.length = 0;
+    this.attached = false;
+    this.pausedGetter = null;
+  }
+
+  /** Starts decoding a music cue ahead of time (no-op without a context). */
+  preloadCue(key: string): void {
+    if (!this.ctx) return;
+    for (const m of MUSIC_FILES[key] ?? []) void this.decode(m.file);
   }
 
   /** Lantern light fraction 0..1 (1 = full). Drives heartbeat/breathing and the closing-in music filter. */
@@ -339,7 +428,7 @@ export class AudioManager {
       if (!ab) return null;
       try {
         // decodeAudioData detaches its input: keep the encoded copy for later re-decodes
-        const buf = await c.decodeAudioData(ab.slice(0));
+        const buf = await this.decodeAt(ab.slice(0), FILE_RATE.get(file) ?? 0, c);
         this.decoded.set(file, buf);
         return buf;
       } catch {
@@ -350,6 +439,29 @@ export class AudioManager {
     });
     this.decoding.set(file, p);
     return p;
+  }
+
+  /**
+   * Decodes at a reduced sample rate through an OfflineAudioContext (decodeAudioData always resamples to its
+   * context's rate), falling back to the live context. rate 0 = live context rate.
+   */
+  private async decodeAt(ab: ArrayBuffer, rate: number, c: AudioContext): Promise<AudioBuffer> {
+    if (rate > 0 && rate < c.sampleRate && typeof OfflineAudioContext !== 'undefined') {
+      try {
+        const off = new OfflineAudioContext(2, 1, rate);
+        return await off.decodeAudioData(ab.slice(0));
+      } catch {
+        /* unsupported rate: fall through */
+      }
+    }
+    return c.decodeAudioData(ab);
+  }
+
+  /** Approximate decoded PCM held right now, in MB (debug / tests). */
+  get decodedMB(): number {
+    let b = 0;
+    for (const buf of this.decoded.values()) b += buf.length * buf.numberOfChannels * 4;
+    return b / 1e6;
   }
 
   private release(key: string): void {
@@ -496,12 +608,20 @@ export class AudioManager {
     const token = ++this.musicToken;
     const files = MUSIC_FILES[mode] ?? [];
     // memory policy: keep only what this mode (and its likely next cue) needs decoded
+    // (the boss theme is decoded on 'boss:warning' / 'boss:spawned', not at run start)
     if (mode === 'menu') {
       this.release('run');
       this.release('boss');
+    } else if (mode === 'boss') {
+      this.release('menu');
+      // the run stems are not needed during the fight; they are re-decoded from cache when it ends
+      window.setTimeout(() => {
+        if (this.mode === 'boss') this.release('run');
+      }, 2500);
     } else {
       this.release('menu');
-      if (mode === 'run') for (const m of MUSIC_FILES.boss ?? []) void this.decode(m.file);
+      if (this.cue?.key !== 'boss') this.release('boss');
+      else window.setTimeout(() => this.mode === 'run' && this.release('boss'), 3000);
     }
     this.wantAmbience = true;
     void this.ensureAmbience();
@@ -595,7 +715,10 @@ export class AudioManager {
       g.gain.value = 1.2;
       src.connect(g).connect(this.stingerGain);
       src.start(c.currentTime + 0.35); // let the run music fade first
-      src.onended = () => g.disconnect();
+      src.onended = () => {
+        g.disconnect();
+        this.release(key);
+      };
     });
   }
 
@@ -612,8 +735,14 @@ export class AudioManager {
     if (!c || c.state !== 'running') return;
     const now = c.currentTime;
     const inRun = this.mode === 'run' || this.mode === 'boss';
-    // gameplay calls setIntensity every frame; silence for >500 ms means paused / level-up / chest screen
-    const paused = inRun && performance.now() - this.lastIntensityCall > 500;
+    if (!this.attached) this.autoAttach();
+    // explicit pause state when the game provides one; otherwise setIntensity silence (generous threshold so a
+    // slow frame on a weak machine is not mistaken for the pause menu)
+    let paused: boolean;
+    if (this.pausedGetter) paused = this.pausedGetter();
+    else if (this.pausedExplicit !== null) paused = this.pausedExplicit;
+    else paused = performance.now() - this.lastIntensityCall > 1500;
+    paused = inRun && paused;
     if (paused !== this.paused) this.paused = paused;
 
     // intensity smoothing: swell in faster than it decays (no flapping on wave edges)
@@ -652,6 +781,16 @@ export class AudioManager {
       this.nextBeat = 0;
       this.nextBreath = 0;
     }
+  }
+
+  /**
+   * Until Game calls attach() itself: find the game that owns this manager (main.ts exposes window.__game) and
+   * attach to its event bus, reading the pause state from its state machine.
+   */
+  private autoAttach(): void {
+    const g = (window as unknown as { __game?: { audio?: unknown; events?: EventBus; state?: string } }).__game;
+    if (!g || g.audio !== this || !g.events) return;
+    this.attach(g.events, () => g.state === 'paused' || g.state === 'levelup');
   }
 
   /** Scheduled (sample-accurate) one-shot used by the control loop. */

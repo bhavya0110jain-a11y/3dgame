@@ -9,12 +9,30 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Last Lantern</title>
     <meta name="description" content="Carry the last light through a moonlit night that wants it out. A 3D roguelite survival game where your light is your life." />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <!-- Social / link previews (og-image.png is composed from an in-engine shot by tools/package-screens.mjs) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Last Lantern" />
+    <meta property="og:title" content="Last Lantern — your light is your life" />
+    <meta property="og:description" content="Carry the last light through a moonlit night that wants it out. Hundreds of shadows, absurd builds, three nights, one lantern." />
+    <meta property="og:image" content="./og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="A lantern-bearer holds back a horde of shadows in a moonlit pine forest." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Last Lantern" />
+    <meta name="twitter:description" content="Carry the last light through a moonlit night that wants it out. A 3D roguelite survival game." />
+    <meta name="twitter:image" content="./og-image.png" />
     <link rel="stylesheet" href="/src/ui/style.css" />
   </head>
   <body>
     <div id="game-root">
       <canvas id="game-canvas" aria-label="Last Lantern game view"></canvas>
       <div id="ui-root"></div>
+      <noscript><p style="position:fixed;inset:0;display:grid;place-items:center;margin:0;color:#ffe27a;background:#0b0920;font:600 20px system-ui,sans-serif">Last Lantern needs JavaScript and WebGL2 to run.</p></noscript>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

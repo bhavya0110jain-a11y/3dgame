@@ -70,3 +70,16 @@ export class RunState {
       .sort((a, b) => b.damage - a.damage);
   }
 }
+
+/** Ash per kill in the run payout (Sprint 2: 1/20 → 1/40 — adaptive pressure raised kill counts ~1.8×). */
+export const ASH_PER_KILL = 1 / 40;
+
+/**
+ * Ash payout for a finished run (Game.endRun, the dawn screen preview and the balance sim all use this).
+ * pickups + kills·ASH_PER_KILL + 5/min + victory 150×difficulty + 12/min of endless night, × greed.
+ */
+export function ashForRun(run: RunState, victory: boolean, difficulty: number): number {
+  const minutes = run.elapsed / 60;
+  const base = run.ashEarned + run.kills * ASH_PER_KILL + minutes * 5 + (victory ? 150 * difficulty : 0) + (run.endlessTime / 60) * 12;
+  return Math.round(base * run.stats.greed);
+}

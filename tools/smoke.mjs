@@ -59,8 +59,8 @@ let levelShot = false;
 for (let i = 0; i < 14; i++) {
   await page.evaluate(() => {
     const g = window.__game;
-    for (let k = 0; k < 45 && g.state === 'playing'; k++) g.updateRun(1 / 30);
-    g.renderer.rig.snap(g.player.x, g.player.z); // fast-forward outruns the dt-smoothed camera on ~1 fps SwiftShader
+    for (let k = 0; k < 90 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+    g.renderer.rig.follow(1 / 30, g.player.x, g.player.z, 0, 0, 0, 0, NaN, NaN); g.renderer.rig.snap(g.player.x, g.player.z); // follow() first: snap() alone does not end the menu->run swoop // fast-forward outruns the dt-smoothed camera on ~1 fps SwiftShader
   });
   await page.waitForTimeout(700);
   const state = await page.evaluate(() => window.__game.state);
@@ -82,7 +82,9 @@ for (let i = 0; i < 14; i++) {
   if (state === 'gameover') break;
 }
 await page.keyboard.up('KeyW');
-await page.evaluate(() => { window.__game.debug.timeScale = 1; });
+if (!levelShot) console.warn('WARN: no level-up reached during the fast-forward (smoke-04-levelup.png not captured)');
+// the red damage vignette decays per RENDERED frame; after seconds of fast-forwarded hits it would tint the whole shot
+await page.evaluate(() => { window.__game.debug.timeScale = 1; window.__game.renderer.damagePulse = 0; });
 await page.waitForTimeout(400);
 await page.screenshot({ path: join(outDir, 'smoke-03-gameplay.png') });
 
@@ -101,8 +103,10 @@ await page.evaluate(() => {
       if (def) g.run.weapons.push(def.create(g));
     }
   }
-  g.player.invuln = 999;
-  g.renderer.rig.snap(g.player.x, g.player.z);
+  // god mode WITHOUT invuln: invuln > 0.4 blinks the bearer group (and its lantern light) off every other 50 ms
+  g.__realDamage = g.player.damage;
+  g.player.damage = () => {};
+  g.renderer.rig.follow(1 / 30, g.player.x, g.player.z, 0, 0, 0, 0, NaN, NaN); g.renderer.rig.snap(g.player.x, g.player.z); // follow() first: snap() alone does not end the menu->run swoop
 });
 await page.waitForTimeout(1500);
 await page.screenshot({ path: join(outDir, 'smoke-06-combat.png') });
@@ -111,10 +115,49 @@ await page.evaluate(() => {
   const g = window.__game;
   g.enemies.clear();
   g.enemies.spawn(g.world.biome.bossId, g.player.x, g.player.z - 7);
+  // play the 1 s rise-from-the-ground spawn in sim time (SwiftShader frames are too slow to advance it)
+  for (let k = 0; k < 45 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+  g.renderer.rig.follow(1 / 30, g.player.x, g.player.z, 0, 0, 0, 0, NaN, NaN); g.renderer.rig.snap(g.player.x, g.player.z); // follow() first: snap() alone does not end the menu->run swoop
+  g.renderer.damagePulse = 0;
 });
 await page.waitForTimeout(1200);
 await page.screenshot({ path: join(outDir, 'smoke-07-boss.png') });
-await page.evaluate(() => { window.__game.player.invuln = 0; });
+// Reliquary reveal (S2 chest screen): a plain chest, then an evolution chest. Game.openChest runs on 'chest:opened'.
+const failures = [];
+await page.evaluate(() => { window.__game.enemies.clear(); });
+const chestShot = async (name) => {
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.events.emit('chest:opened', {});
+    g.chestTimer = 600; // hold the reveal (auto-continue is ~2.8 s of game time) while SwiftShader catches up
+  });
+  await page.waitForTimeout(3200); // the item fly-out is real-time CSS (~2.3 s for 4 items)
+  await settle();
+  const st = await page.evaluate(() => ({ state: window.__game.state, mode: window.__game.levelMode, vis: !!document.querySelector('.screen-chest.visible'), evolved: window.__game.lastChest?.evolved }));
+  if (st.state !== 'levelup' || st.mode !== 'chest' || !st.vis) failures.push(`${name}: reliquary screen not shown (${JSON.stringify(st)})`);
+  await page.screenshot({ path: join(outDir, name) });
+  // Continue via the real button (first press may only skip the animation)
+  for (let k = 0; k < 3 && (await page.evaluate(() => window.__game.state)) === 'levelup'; k++) {
+    await page.click('.screen-chest [data-act=continue]').catch(() => {});
+    await page.waitForTimeout(500);
+  }
+  await page.evaluate(() => { const g = window.__game; for (let n = 0; n < 8 && g.state === 'levelup'; n++) (g.levelMode === 'chest' ? g.closeChest() : g.chooseUpgrade(0)); });
+  if ((await page.evaluate(() => window.__game.state)) !== 'playing') failures.push(`${name}: Continue did not return to play`);
+  return st;
+};
+await chestShot('smoke-09-chest.png');
+// evolution: max out Ember Bolt and own its catalyst (Flint) so rollChest leads with the evolution
+await page.evaluate(() => {
+  const g = window.__game;
+  const w = g.run.weapons.find((x) => x.def.evolvesInto && x.def.evolvesWith);
+  if (w) { w.level = w.def.maxLevel; g.run.passives.set(w.def.evolvesWith, Math.max(1, g.run.passives.get(w.def.evolvesWith) ?? 0)); }
+});
+const evo = await chestShot('smoke-10-chest-evolution.png');
+if (!evo.evolved) failures.push('smoke-10: evolution chest did not evolve');
+// Bearer model must follow the simulated position (regression: eb9cca8 dropped group.position sync)
+const pos = await page.evaluate(() => { const p = window.__game.player; return { x: p.x, z: p.z, gx: p.group.position.x, gz: p.group.position.z }; });
+if (Math.hypot(pos.x - pos.gx, pos.z - pos.gz) > 0.05) failures.push(`bearer model not at player position: player (${pos.x.toFixed(2)}, ${pos.z.toFixed(2)}) vs group (${pos.gx.toFixed(2)}, ${pos.gz.toFixed(2)})`);
+await page.evaluate(() => { const g = window.__game; g.player.damage = g.__realDamage; g.player.invuln = 0; });
 const summary = await page.evaluate(() => {
   const g = window.__game;
   return { state: g.state, elapsed: g.run.elapsed.toFixed(1), level: g.run.level, kills: g.run.kills, enemies: g.enemies.activeCount, weapons: g.run.weapons.map((w) => w.def.id + ':' + w.level), light: Math.round(g.player.lightValue) };
@@ -127,9 +170,43 @@ await page.waitForTimeout(600);
 await settle();
 await page.screenshot({ path: join(outDir, 'smoke-05-gameover.png') });
 
+// Restart from the game-over screen, kill the master, take the dawn choice -> Endless Night -> victory screen.
+await page.click('.screen.visible [data-act=again]');
+await page.waitForTimeout(800);
+if ((await page.evaluate(() => window.__game.state)) !== 'playing') failures.push('gameover: Light Again did not start a new run');
+await page.evaluate(() => {
+  const g = window.__game;
+  g.player.damage = () => {};
+  for (let k = 0; k < 60 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+  g.renderer.rig.follow(1 / 30, g.player.x, g.player.z, 0, 0, 0, 0, NaN, NaN); g.renderer.rig.snap(g.player.x, g.player.z); // follow() first: snap() alone does not end the menu->run swoop
+  g.events.emit('boss:killed', { defId: g.world.biome.bossId }); // dawn choice opens 2.2 s (real time) later
+});
+await page.waitForFunction(() => window.__game.levelMode === 'dawn' && window.__game.state === 'levelup', null, { timeout: 60_000 }).catch(() => failures.push('dawn: choice never opened after boss:killed'));
+await page.waitForTimeout(2500); // sunrise animation + 0.9 s input lock
+await settle();
+if (!(await page.evaluate(() => !!document.querySelector('.screen-dawn.visible .dawn-card[data-i="1"]')))) failures.push('dawn: dawn screen / Endless card not visible');
+await page.screenshot({ path: join(outDir, 'smoke-11-dawn.png') });
+await page.click('.screen-dawn .dawn-card[data-i="1"]').catch((e) => failures.push('dawn: endless click failed ' + e));
+await page.waitForTimeout(700);
+const endless = await page.evaluate(() => ({ state: window.__game.state, endless: window.__game.run.endless }));
+if (endless.state !== 'playing' || !endless.endless) failures.push('dawn: Endless Night did not continue the run ' + JSON.stringify(endless));
+await page.evaluate(() => {
+  const g = window.__game;
+  for (let k = 0; k < 90 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+  g.renderer.rig.follow(1 / 30, g.player.x, g.player.z, 0, 0, 0, 0, NaN, NaN); g.renderer.rig.snap(g.player.x, g.player.z); // follow() first: snap() alone does not end the menu->run swoop
+});
+await settle();
+await page.screenshot({ path: join(outDir, 'smoke-12-endless.png') });
+await page.evaluate(() => window.__game.endRun(false)); // run.victory is already set -> victory screen
+await page.waitForTimeout(600);
+await settle();
+await page.screenshot({ path: join(outDir, 'smoke-13-victory.png') });
+await page.click('.screen.visible [data-act=menu]');
+await page.waitForTimeout(800);
+if ((await page.evaluate(() => window.__game.state)) !== 'menu') failures.push('victory: Main Menu did not return to the menu');
+
 // Touch + portrait phone: taps must reach menu buttons (regression for BUG-QA-004) and the HUD must fit portrait.
 // Set SMOKE_TOUCH=0 to skip (adds ~20 s under SwiftShader).
-const failures = [];
 if (process.env.SMOKE_TOUCH !== '0') {
   await page.close(); // free the main page's render loop before booting a second game instance
   const tctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
@@ -152,9 +229,13 @@ if (process.env.SMOKE_TOUCH !== '0') {
     failures.push('touch: tapping Start did not start a run');
     await tpage.evaluate(() => window.__game.startRun());
   }
-  await tpage.evaluate(() => { window.__game.debug.timeScale = 3; });
-  await tpage.waitForTimeout(1500);
-  await tpage.evaluate(() => { window.__game.debug.timeScale = 1; });
+  // fixed-step fast-forward + camera snap: a timeScale wait covers ~0 s of game time at SwiftShader's ~1 fps and
+  // left the shot on the first frame of the menu -> run camera swoop (00:00, hero framing)
+  await tpage.evaluate(() => {
+    const g = window.__game;
+    for (let k = 0; k < 90 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+    g.renderer.rig.follow(1 / 30, g.player.x, g.player.z, 0, 0, 0, 0, NaN, NaN); g.renderer.rig.snap(g.player.x, g.player.z); // follow() first: snap() alone does not end the menu->run swoop
+  });
   await settle(tpage);
   await tpage.screenshot({ path: join(outDir, 'smoke-08-portrait.png') });
   await tctx.close();

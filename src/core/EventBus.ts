@@ -10,6 +10,7 @@ export type GameEvents = {
   'run:started': {};
   'run:ended': { victory: boolean };
   'boss:spawned': { defId: string };
+  'boss:warning': Record<string, never>;
   'boss:killed': { defId: string };
   'chest:opened': {};
   // --- gameplay systems (evolutions, bosses, achievements) ---

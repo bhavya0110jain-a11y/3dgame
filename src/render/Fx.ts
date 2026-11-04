@@ -96,6 +96,13 @@ const FX_CSS = `
 `;
 
 const LIGHTS = 2;
+/** Immediate-mode sprite stride: x y z size frame color intensity rot kind alpha (kind: 0 glow, 1 ground, 2 column). */
+const IMM_F = 10;
+const IMM_MAX = 768;
+const IK_GLOW = 0, IK_GROUND = 1, IK_COLUMN = 2;
+/** Immediate-mode strip header: n w0 w1 color intensity a0 a1 core, then n xyz points. */
+const IS_H = 8;
+const IS_CAP = 16384;
 
 export class FxManager {
   readonly particles: ParticleSystem;
@@ -110,10 +117,33 @@ export class FxManager {
   // transient light columns (level-up, boss death): SoA x y z w h color int age life flags
   private cols = new Float32Array(16 * 10);
   private colCount = 0;
-  // immediate-mode glows for this frame: x y z size frame color intensity
-  private imm = new Float32Array(256 * 7);
+  // immediate-mode sprites (glows, ground sprites, light shafts) for this frame — see IMM_F
+  private imm = new Float32Array(IMM_MAX * IMM_F);
   private immCount = 0;
   private immFresh = false;
+  // immediate-mode strips (beams, tethers) for this frame — see IS_H
+  private immS = new Float32Array(IS_CAP);
+  private immSLen = 0;
+  /** Scratch polyline for helpers that build strips (tethers, beams). */
+  private poly = new Float32Array(16 * 3);
+
+  /**
+   * Accessibility: dims every flash/strobe (core flashes, crit bursts, point-light pops, light columns, lightning
+   * flicker). Set by the game from save.settings.reducedFlashing; also follows the `a11y-noflash` class on <html>
+   * that ui/prefs.applyUiPrefs toggles, so it works without extra wiring.
+   */
+  reducedFlashing = false;
+  /** 1 normally, ~0.35 with reduced flashing: multiplier for flash intensity. */
+  private flashK = 1;
+  private flashCheck = 0;
+  /** Current brightness-governor gain (1 = calm, ~0.6 = screen full of light). */
+  private gain = 1;
+  private tollT = -1;
+  private tollX = 0;
+  private tollZ = 0;
+  /** Player position (set every simulated frame via setFocus) — big effects keep their brightest parts off the player. */
+  private fx0 = 0;
+  private fz0 = 0;
 
   // pooled flash lights
   private lights: THREE.PointLight[] = [];
@@ -132,11 +162,11 @@ export class FxManager {
   constructor(private scene: THREE.Scene, private camera: THREE.Camera, private uiLayer: HTMLElement) {
     this.particles = new ParticleSystem(scene, 4000);
     this.ground = new GroundFx(scene, 160);
-    this.strips = new Strips(scene, 6000);
-    this.bolts = new Lightning(96);
-    this.ribbons = new Ribbons(32);
+    this.strips = new Strips(scene, 12000);
+    this.bolts = new Lightning(160);
+    this.ribbons = new Ribbons(64);
     this.fire = new FirePools(scene, 48);
-    this.boards = new Billboards(scene, 256 + 16, 23);
+    this.boards = new Billboards(scene, IMM_MAX + 16, 23);
     for (let i = 0; i < LIGHTS; i++) {
       const l = new THREE.PointLight(0xffffff, 0, 8, 1.6);
       l.castShadow = false;
@@ -248,7 +278,7 @@ export class FxManager {
     if (dl > 1e-4) { dx = dirX / dl; dz = dirZ / dl; } else { const a = this.r() * 6.28; dx = Math.cos(a); dz = Math.sin(a); }
     // impact point on the side of the body facing the attacker
     const ix = x - dx * 0.35 * scale, iz = z - dz * 0.35 * scale;
-    if (crit || this.hitBudget > 16) ps.emit(ix, y, iz, 0, 0, 0, crit ? 0.14 : 0.08, crit ? 1.1 : 0.6, crit ? 2.0 : 1.0, 0xffffff, color, crit ? 2.4 : 1.5, crit ? Frame.BURST : Frame.FLARE, 1, 0, 0, 0, 0, this.r() * 6.28);
+    if (crit || this.hitBudget > 16) ps.emit(ix, y, iz, 0, 0, 0, crit ? 0.14 : 0.08, crit ? 1.1 : 0.6, crit ? 2.0 : 1.0, 0xffffff, color, (crit ? 2.4 : 1.5) * this.flashK, crit ? Frame.BURST : Frame.FLARE, 1, 0, 0, 0, 0, this.r() * 6.28);
     if (cheap && !crit) return;
     const n = crit ? 12 : 4;
     for (let i = 0; i < n; i++) {
@@ -261,7 +291,7 @@ export class FxManager {
     }
     if (crit) {
       this.ground.add(GM_SHOCK, x, z, 0.3 * scale, 1.7 * scale, 0.26, 0xffd04a, 1.6, 0.1);
-      ps.emit(ix, y + 0.2, iz, 0, 0, 0, 0.22, 0.5, 1.8, 0xfff6c0, 0xffb030, 2.2, Frame.STAR, 1, 0, 0, 0, 0, this.r() * 0.6, 0);
+      ps.emit(ix, y + 0.2, iz, 0, 0, 0, 0.22, 0.5, 1.8, 0xfff6c0, 0xffb030, 2.2 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r() * 0.6, 0);
     }
   }
 
@@ -275,7 +305,7 @@ export class FxManager {
     const k = tier === 2 ? 5 : tier === 1 ? 2.2 : 1;
     const room = 1 - ps.pressure * 0.75;
     // core flash
-    ps.emit(x, y, z, 0, 0, 0, 0.14 * Math.sqrt(k), 0.9 * scale, 2.0 * scale, 0xffffff, color, 2.2, Frame.CORE, 1);
+    ps.emit(x, y, z, 0, 0, 0, 0.14 * Math.sqrt(k), 0.9 * scale, 2.0 * scale, 0xffffff, color, 2.2 * this.flashK, Frame.CORE, 1);
     // ground light splash (fake light)
     this.ground.add(GM_GLOW, x, z, 1.2 * scale, 2.0 * scale * Math.sqrt(k), 0.28 * Math.sqrt(k), color, 0.5);
     this.ground.add(GM_SHOCK, x, z, 0.3 * scale, 1.6 * scale * Math.sqrt(k), 0.3, color, 1.4, 0.1 * scale);
@@ -313,7 +343,7 @@ export class FxManager {
     }
     if (tier >= 1) {
       this.light(x, y + 0.6, z, color, tier === 2 ? 70 : 35, tier === 2 ? 18 : 9, tier === 2 ? 1.4 : 0.45);
-      ps.emit(x, y, z, 0, 0, 0, 0.26, 1.2 * scale, 3.5 * scale, 0xffffff, color, 2, Frame.FLARE, 1);
+      ps.emit(x, y, z, 0, 0, 0, 0.26, 1.2 * scale, 3.5 * scale, 0xffffff, color, 2 * this.flashK, Frame.FLARE, 1);
       this.ground.add(GM_SHOCK, x, z, 0.5, 3.5 * scale * (tier === 2 ? 2 : 1), 0.55, color, 1.8, 0.25);
     }
     if (tier === 2) this.bossDeath(x, z, scale, color);
@@ -334,7 +364,7 @@ export class FxManager {
       const rr = this.r() * 2.5 * scale * 0.5;
       const ex = x + Math.cos(a) * rr, ez = z + Math.sin(a) * rr;
       const delay = 0.1 + i * 0.1;
-      ps.emit(ex, 1.5, ez, 0, 0, 0, 0.22, 1, 2.8, 0xffffff, color, 2, Frame.BURST, 1, 0, 0, 0, 0, this.r() * 6, 0, delay);
+      ps.emit(ex, 1.5, ez, 0, 0, 0, 0.22, 1, 2.8, 0xffffff, color, 2 * this.flashK, Frame.BURST, 1, 0, 0, 0, 0, this.r() * 6, 0, delay);
       for (let j = 0; j < 12; j++) {
         const b = this.r() * Math.PI * 2;
         const sp = 6 + this.r() * 10;
@@ -357,8 +387,17 @@ export class FxManager {
   }
 
   /** Danger-zone telegraph that fills over `duration` seconds then flashes. For gameplay (boss slams etc). */
-  telegraph(x: number, z: number, radius: number, duration: number, color = 0xb04dff): void {
-    this.ground.add(GM_TELEGRAPH, x, z, radius, radius, duration, color, 3.2, Math.max(0.1, radius * 0.04));
+  telegraph(x: number, z: number, radius: number, duration: number, color = 0xb04dff, intensity = 3.2): void {
+    this.ground.add(GM_TELEGRAPH, x, z, radius, radius, duration, color, intensity, Math.max(0.1, radius * 0.04));
+  }
+
+  /**
+   * Player-weapon target mark (Vesper Bell etc.): a thin golden sigil ring that draws itself over `duration`.
+   * Deliberately NOT the danger telegraph — players learn that the dark pulsing zone means "move", so their own
+   * weapons must never borrow it — and with no fill, so stacked marks never wash a pack out to white.
+   */
+  markZone(x: number, z: number, radius: number, duration: number, color = 0xffd27a): void {
+    this.ground.add(GM_SHOCK, x, z, radius * 0.25, radius, duration, color, 1.2, Math.max(0.08, radius * 0.03));
   }
 
   /** Flare Nova: crisp shockwave + inner heat band + blinding flash + rising sparks + radial ground sparks. */
@@ -367,7 +406,8 @@ export class FxManager {
     this.ground.add(GM_SHOCK, x, z, 0.4, radius, 0.42, color, 2.2, Math.max(0.16, radius * 0.05));
     this.ground.add(GM_SHOCK, x, z, 0.2, radius * 0.75, 0.32, 0xffffff, 1.2, 0.1, 0.04);
     this.ground.add(GM_GLOW, x, z, radius * 0.5, radius * 0.9, 0.3, color, 0.35);
-    ps.emit(x, 1.2, z, 0, 0, 0, 0.12, 1.2, radius * 0.45, 0xffffff, color, 1.3, Frame.CORE, 1);
+    // core flash: capped so a huge pulse never whites out the player standing in its centre
+    ps.emit(x, 1.2, z, 0, 0, 0, 0.12, 1.2, Math.min(2.4, radius * 0.45), 0xffffff, color, 1.3 * this.flashK, Frame.CORE, 1);
     const n = Math.ceil(40 * (1 - ps.pressure * 0.7));
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + this.r() * 0.15;
@@ -396,7 +436,7 @@ export class FxManager {
       const fr = i % 3 === 0 ? Frame.STAR : Frame.SPARKLE;
       ps.emit(x + Math.cos(a) * rr, 0.3 + this.r() * 0.6, z + Math.sin(a) * rr, Math.cos(a) * 0.4, 3 + this.r() * 5, Math.sin(a) * 0.4, 1.1 + this.r() * 0.8, fr === Frame.STAR ? 0.7 : 0.4, 0.15, 0xffffff, 0xffc04a, 3, fr, 1, -1, 0.6, 0, PF_UNSCALED | PF_FLICKER, this.r() * 6, (this.r() - 0.5) * 3, this.r() * 0.4);
     }
-    ps.emit(x, 1.3, z, 0, 0, 0, 0.35, 1.5, 4.5, 0xffffff, 0xffc04a, 1.6, Frame.FLARE, 1, 0, 0, 0, PF_UNSCALED);
+    ps.emit(x, 1.3, z, 0, 0, 0, 0.35, 1.5, 4.5, 0xffffff, 0xffc04a, 1.6 * this.flashK, Frame.FLARE, 1, 0, 0, 0, PF_UNSCALED);
     this.light(x, 2, z, 0xffd27a, 45, 12, 0.9);
   }
 
@@ -414,7 +454,7 @@ export class FxManager {
       this.bolts.add(fx, fy, fz, fx + Math.cos(a) * fl, fy - 0.3 - this.r() * 0.5, fz + Math.sin(a) * fl, color, width * 0.5, life * 0.7, 0.18);
     }
     const ps = this.particles;
-    ps.emit(bx, by, bz, 0, 0, 0, 0.1, 0.5, 1.3, 0xffffff, color, 1.8, Frame.FLARE, 1, 0, 0, 0, 0, this.r() * 6);
+    ps.emit(bx, by, bz, 0, 0, 0, 0.1, 0.5, 1.3, 0xffffff, color, 1.8 * this.flashK, Frame.FLARE, 1, 0, 0, 0, 0, this.r() * 6);
     for (let i = 0; i < 4; i++) {
       const a = this.r() * Math.PI * 2;
       const sp = 4 + this.r() * 6;
@@ -439,7 +479,7 @@ export class FxManager {
 
   /** Bright flash sprite + ground splash (+ optional real light). */
   flash(x: number, y: number, z: number, color: number, size = 2, intensity = 3, withLight = false): void {
-    this.particles.emit(x, y, z, 0, 0, 0, 0.12, size * 0.4, size * 0.8, 0xffffff, color, intensity * 0.6, Frame.CORE, 1);
+    this.particles.emit(x, y, z, 0, 0, 0, 0.12, size * 0.4, size * 0.8, 0xffffff, color, intensity * 0.6 * this.flashK, Frame.CORE, 1);
     this.ground.add(GM_GLOW, x, z, size * 0.5, size * 0.8, 0.22, color, 0.5);
     if (withLight) this.light(x, y + 0.5, z, color, 30, size * 4, 0.25);
   }
@@ -492,15 +532,71 @@ export class FxManager {
    * Immediate-mode glow sprite drawn THIS frame only (orbiting orbs, beacons). Persists while paused.
    * frame defaults to GLOW; intensity >1 blooms.
    */
-  glow(x: number, y: number, z: number, size: number, color: number, intensity = 2, frame: number = Frame.GLOW): void {
+  glow(x: number, y: number, z: number, size: number, color: number, intensity = 2, frame: number = Frame.GLOW, rot = 0, alpha = 1): void {
+    this.pushImm(IK_GLOW, x, y, z, size, frame, color, intensity, rot, alpha);
+  }
+
+  /** Immediate-mode atlas sprite lying flat on the ground (this frame only). */
+  groundGlow(x: number, z: number, size: number, color: number, intensity = 1, frame: number = Frame.GLOW, rot = 0, alpha = 1, y = 0.06): void {
+    this.pushImm(IK_GROUND, x, y, z, size, frame, color, intensity, rot, alpha);
+  }
+
+  /** Immediate-mode vertical light shaft standing on (x, y, z) (this frame only). */
+  shaft(x: number, y: number, z: number, width: number, height: number, color: number, intensity: number, alpha = 1): void {
+    this.pushImm(IK_COLUMN, x, y, z, width, 0, color, intensity * this.flashK, height, alpha);
+  }
+
+  private beginImm(): void {
     if (this.immFresh) {
       this.immCount = 0;
+      this.immSLen = 0;
       this.immFresh = false;
     }
-    if (this.immCount >= 256) return;
-    const o = this.immCount++ * 7;
+  }
+
+  private pushImm(kind: number, x: number, y: number, z: number, size: number, frame: number, color: number, intensity: number, rot: number, alpha: number): void {
+    this.beginImm();
+    if (this.immCount >= IMM_MAX) return;
+    const o = this.immCount++ * IMM_F;
     const m = this.imm;
     m[o] = x; m[o + 1] = y; m[o + 2] = z; m[o + 3] = size; m[o + 4] = frame; m[o + 5] = color; m[o + 6] = intensity;
+    m[o + 7] = rot; m[o + 8] = kind; m[o + 9] = alpha;
+  }
+
+  /**
+   * Immediate-mode glowing polyline (this frame only): `pts` holds n xyz points from `off`. Width/alpha interpolate
+   * head → tail; `core` 0..1 is the white-hot centre. Used for beams and tethers.
+   */
+  polyline(pts: Float32Array, n: number, w0: number, w1: number, color: number, intensity: number, a0: number, a1: number, core: number, off = 0): void {
+    this.beginImm();
+    if (n < 2 || this.immSLen + IS_H + n * 3 > IS_CAP) return;
+    const b = this.immS;
+    let o = this.immSLen;
+    b[o++] = n; b[o++] = w0; b[o++] = w1; b[o++] = color; b[o++] = intensity; b[o++] = a0; b[o++] = a1; b[o++] = core;
+    for (let i = 0; i < n * 3; i++) b[o++] = pts[off + i];
+    this.immSLen = o;
+  }
+
+  /** Immediate-mode straight beam between two points (this frame only). */
+  beam(ax: number, ay: number, az: number, bx: number, by: number, bz: number, w0: number, w1: number, color: number, intensity: number, a0 = 1, a1 = 0.2, core = 0.8): void {
+    const q = this.poly;
+    q[0] = ax; q[1] = ay; q[2] = az;
+    q[3] = (ax + bx) * 0.5; q[4] = (ay + by) * 0.5; q[5] = (az + bz) * 0.5;
+    q[6] = bx; q[7] = by; q[8] = bz;
+    this.polyline(q, 3, w0, w1, color, intensity, a0, a1, core);
+  }
+
+  /** Player position for this frame (keeps big flashes and flame licks off the hero). */
+  setFocus(x: number, z: number): void {
+    this.fx0 = x;
+    this.fz0 = z;
+    this.fire.focusX = x;
+    this.fire.focusZ = z;
+  }
+
+  /** Squared distance from the player (see setFocus). */
+  private focusD2(x: number, z: number): number {
+    return (x - this.fx0) * (x - this.fx0) + (z - this.fz0) * (z - this.fz0);
   }
 
   /** Transient vertical light shaft. flags: PF_UNSCALED to animate during pause. */
@@ -508,11 +604,12 @@ export class FxManager {
     if (this.colCount >= 16) return;
     const o = this.colCount++ * 10;
     const c = this.cols;
-    c[o] = x; c[o + 1] = y; c[o + 2] = z; c[o + 3] = width; c[o + 4] = height; c[o + 5] = color; c[o + 6] = intensity; c[o + 7] = 0; c[o + 8] = life; c[o + 9] = flags;
+    c[o] = x; c[o + 1] = y; c[o + 2] = z; c[o + 3] = width; c[o + 4] = height; c[o + 5] = color; c[o + 6] = intensity * (0.45 + 0.55 * this.flashK); c[o + 7] = 0; c[o + 8] = life; c[o + 9] = flags;
   }
 
   /** Brief real point-light flash from a small pool (steals the most-faded light). */
   light(x: number, y: number, z: number, color: number, intensity: number, distance: number, duration: number): void {
+    intensity *= this.flashK;
     let best = 0;
     let bestLeft = Infinity;
     for (let i = 0; i < LIGHTS; i++) {
@@ -529,6 +626,307 @@ export class FxManager {
     this.lightPeak[best] = intensity;
   }
 
+  // ======================================================================== weapon signatures (Sprint 2)
+  // Every weapon gets anticipation (wind-up / tell), impact and afterglow. Evolutions add white-hot cores and golden
+  // accents. Immediate-mode helpers (hookHead, hookTether, bellFall, lighthouseBeam, sunOrb, dawnGather) must be
+  // called every simulated frame by their owner; the rest are one-shot.
+
+  /**
+   * Weapon evolution moment: a white-gold pillar, the reliquary rune, a ring of stars thrown outward and a rising
+   * fountain of golden motes. Animates on real time (the reliquary screen pauses the game).
+   */
+  evolution(x: number, z: number, color = 0xfff0a0): void {
+    const ps = this.particles;
+    this.column(x, 0, z, 3.4, 22, 0xffd27a, 1.6, 2.0, PF_UNSCALED);
+    this.column(x, 0, z, 1.1, 24, 0xffffff, 1.6, 1.6, PF_UNSCALED);
+    this.ground.add(GM_RUNE, x, z, 1.2, 4.2, 2.2, 0xffd27a, 2.4, 0.14, 0, GF_UNSCALED);
+    this.ground.add(GM_SHOCK, x, z, 0.5, 12, 1.0, color, 2.6, 0.4, 0, GF_UNSCALED);
+    this.ground.add(GM_SHOCK, x, z, 0.5, 7, 0.8, 0xffffff, 1.6, 0.2, 0.12, GF_UNSCALED);
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      ps.emit(x + Math.cos(a) * 0.6, 1.2, z + Math.sin(a) * 0.6, Math.cos(a) * 9, 1.5, Math.sin(a) * 9, 0.7, 0.7, 0.2, 0xffffff, color, 3, Frame.STAR, 1, -2, 2.2, 0, PF_UNSCALED | PF_FLICKER, a, 3);
+    }
+    for (let i = 0; i < 60; i++) {
+      const a = this.r() * Math.PI * 2;
+      const rr = 0.3 + this.r() * 1.4;
+      ps.emit(x + Math.cos(a) * rr, 0.3, z + Math.sin(a) * rr, Math.cos(a) * 0.5, 4 + this.r() * 7, Math.sin(a) * 0.5, 1.2 + this.r() * 0.8, 0.3, 0.08, 0xfff6d0, 0xffb030, 2.8, i % 4 === 0 ? Frame.STAR : Frame.GLOW, 1, -1.5, 0.5, 0.02, PF_UNSCALED | PF_FLICKER, 0, 0, this.r() * 0.5);
+    }
+    this.light(x, 2.5, z, 0xffd27a, 50, 16, 1.2);
+  }
+
+  /** Lantern Hook head (every frame): a spinning sickle of lamp-light with a hot core and a light pool below. */
+  hookHead(x: number, y: number, z: number, spin: number, s: number, evolved: boolean): void {
+    const c = evolved ? 0xa47cff : 0xffb43a;
+    this.glow(x, y, z, 1.7 * s, c, 0.4);
+    this.glow(x, y, z, 1.35 * s, c, 1.5, Frame.WISP, spin);
+    this.glow(x, y, z, 1.35 * s, evolved ? 0xd8c8ff : 0xffd890, 1.3, Frame.WISP, spin + Math.PI);
+    this.glow(x, y, z, 0.45 * s, 0xfff6e0, 2.2, Frame.CORE);
+    if (evolved) this.glow(x, y, z, 1.3 * s, 0xffe08a, 0.9, Frame.STAR, -spin * 0.35);
+    this.groundGlow(x, z, 2.4 * s, c, 0.35);
+  }
+
+  /** The glowing lamp-chain from the bearer's hand to a hook (every frame). `t` = time, for the chain's sway. */
+  hookTether(px: number, pz: number, hx: number, hz: number, t: number, evolved: boolean): void {
+    const q = this.poly;
+    const n = 9;
+    const dx = hx - px, dz = hz - pz;
+    const len = Math.hypot(dx, dz) || 1;
+    const sx = -dz / len, sz = dx / len;
+    const sway = Math.min(0.5, len * 0.05);
+    for (let i = 0; i < n; i++) {
+      const f = i / (n - 1);
+      const env = Math.sin(f * Math.PI);
+      const w = Math.sin(t * 9 + f * 5) * sway * env;
+      q[i * 3] = px + dx * f + sx * w;
+      q[i * 3 + 1] = 1.25 - 0.25 * f - env * Math.min(0.6, len * 0.06);
+      q[i * 3 + 2] = pz + dz * f + sz * w;
+    }
+    this.polyline(q, n, evolved ? 0.16 : 0.11, evolved ? 0.2 : 0.14, evolved ? 0xb89cff : 0xffb347, 1.25, 0.25, 0.8, 0.75);
+  }
+
+  /** Hook thrown: a short directional whoosh from the hand. */
+  hookThrow(x: number, z: number, dx: number, dz: number, evolved: boolean): void {
+    this.muzzle(x + dx * 0.6, 1.2, z + dz * 0.6, dx, dz, evolved ? 0xc8b0ff : 0xffcf6a, evolved ? 1.3 : 0.9);
+  }
+
+  /** Hook bites a shadow: a curved slash of sparks across the travel direction. */
+  hookSlash(x: number, z: number, dx: number, dz: number, evolved: boolean): void {
+    const ps = this.particles;
+    if (ps.pressure > 0.8) return;
+    const c = evolved ? 0xc8b0ff : 0xffcf6a;
+    const l = Math.hypot(dx, dz) || 1;
+    const sx = -dz / l, sz = dx / l;
+    for (let i = 0; i < 4; i++) {
+      const k = (this.r() - 0.5) * 2;
+      const sp = 5 + this.r() * 4;
+      ps.emit(x, 0.9, z, (sx * k + dx / l * 0.4) * sp, 1 + this.r() * 2, (sz * k + dz / l * 0.4) * sp, 0.18, 0.2, 0.06, 0xffffff, c, 3, Frame.STREAK, 1, -10, 2, 0.05);
+    }
+  }
+
+  /** Moths released from the lantern: a puff of glowing wing-dust. */
+  mothRelease(x: number, z: number, color: number, evolved: boolean): void {
+    const ps = this.particles;
+    const n = Math.ceil((evolved ? 10 : 6) * (1 - ps.pressure * 0.7));
+    for (let i = 0; i < n; i++) {
+      const a = this.r() * Math.PI * 2;
+      const sp = 1 + this.r() * 2;
+      ps.emit(x, 1.5, z, Math.cos(a) * sp, 0.5 + this.r() * 1.5, Math.sin(a) * sp, 0.5 + this.r() * 0.4, 0.22, 0.05, 0xffffff, color, 2.6, Frame.SPARKLE, 1, -1.5, 1.5, 0, PF_FLICKER, this.r() * 6);
+    }
+    if (evolved) ps.emit(x, 1.6, z, 0, 0.5, 0, 0.3, 0.5, 1.6, 0xfff0c0, 0xffd27a, 1.8 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r());
+  }
+
+  /** A moth splits into a hunting swarm (Lunar Monarchs). */
+  mothSplit(x: number, z: number): void {
+    const ps = this.particles;
+    if (ps.pressure > 0.85) return;
+    ps.emit(x, 1.3, z, 0, 0, 0, 0.18, 0.4, 1.4, 0xffffff, 0xffe08a, 2 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r() * 6);
+    for (let i = 0; i < 6; i++) {
+      const a = this.r() * Math.PI * 2;
+      ps.emit(x, 1.3, z, Math.cos(a) * 3, 1 + this.r() * 2, Math.sin(a) * 3, 0.45, 0.2, 0.05, 0xffffff, 0xa0c8ff, 2.6, Frame.SPARKLE, 1, -2, 2, 0, PF_FLICKER);
+    }
+  }
+
+  /**
+   * Vesper Bell anticipation (every frame while a toll falls; p = 0 → 1): a shaft of light narrows onto the mark
+   * while the phantom bell-light drops out of the sky and the ground ring tightens.
+   */
+  bellFall(x: number, z: number, r: number, p: number, evolved: boolean): void {
+    const c = evolved ? 0xfff0a0 : 0xffd27a;
+    const e = p * p;
+    const big = evolved ? 1.35 : 1;
+    const y = 0.9 + (1 - e) * 10;
+    const onHero = this.focusD2(x, z) < r * r ? 0.45 : 1;
+    this.shaft(x, 0, z, Math.min(1.6, r * 0.45) * (1.2 - 0.6 * p), 15, c, 0.35 + 0.5 * p, (0.18 + 0.3 * p) * onHero);
+    this.glow(x, y, z, (1.2 + 0.9 * p) * big, c, 1.1);
+    this.glow(x, y, z, 0.6 * big, 0xffffff, 1.8, Frame.CORE);
+    this.groundGlow(x, z, r * 2.1 * (1.2 - 0.2 * p), c, 0.25 + 0.5 * p, Frame.RING, p * 2.5);
+    if (evolved) this.glow(x, y, z, 1.6 * p, 0xfff4d0, 0.9, Frame.STAR, p * 4);
+  }
+
+  /** Vesper Bell impact: shock rings, a bell-sigil afterglow, dust thrown along the ground, motes rising after. */
+  bellToll(x: number, z: number, r: number, evolved: boolean, aftershock = false): void {
+    const ps = this.particles;
+    const c = evolved ? 0xfff0a0 : 0xffd27a;
+    // several bells landing on the same pack in the same instant must not stack into a white-out
+    const stacked = this.time - this.tollT < 0.2 && (x - this.tollX) ** 2 + (z - this.tollZ) ** 2 < r * r;
+    this.tollT = this.time;
+    this.tollX = x;
+    this.tollZ = z;
+    const aft = aftershock || stacked ? 0.5 : 1;
+    const near = this.focusD2(x, z) < 6;
+    this.ground.add(GM_SHOCK, x, z, 0.3, r * 1.15, 0.4, c, 1.9, Math.max(0.14, r * 0.05));
+    this.ground.add(GM_SHOCK, x, z, 0.2, r * 0.7, 0.26, 0xffffff, 1.1, 0.1, 0.05);
+    this.ground.add(GM_RUNE, x, z, r * 0.45, r * 0.85, 1.0, c, 0.8 * aft, 0.1);
+    if (!stacked) this.ground.add(GM_GLOW, x, z, r * 0.4, r * 0.8, 0.5, c, 0.15);
+    ps.emit(x, 0.9, z, 0, 0, 0, 0.14, 0.8, near ? 1.6 : Math.min(2.6, r * 0.6), 0xffffff, c, 1.1 * this.flashK * aft * aft, Frame.BURST, 1, 0, 0, 0, 0, this.r() * 6);
+    const room = 1 - ps.pressure * 0.7;
+    const n = Math.ceil(22 * aft * room);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + this.r() * 0.2;
+      const sp = r * (2.2 + this.r());
+      ps.emit(x + Math.cos(a) * 0.3 * r, 0.25, z + Math.sin(a) * 0.3 * r, Math.cos(a) * sp, 0.8 + this.r(), Math.sin(a) * sp, 0.35, 0.3, 0.1, 0xffffff, c, 2.6, Frame.STREAK, 1, -4, 4, 0.04);
+    }
+    const puffs = Math.ceil(6 * aft * room);
+    for (let i = 0; i < puffs; i++) {
+      const a = this.r() * Math.PI * 2;
+      ps.emit(x + Math.cos(a) * r * 0.85, 0.35, z + Math.sin(a) * r * 0.85, Math.cos(a) * 1.2, 0.5 + this.r() * 0.6, Math.sin(a) * 1.2, 0.8 + this.r() * 0.3, 0.8, 2.2, 0x5a4a60, 0x201828, 1, this.r() < 0.5 ? Frame.SMOKE : Frame.SMOKE2, 0, 0.2, 1.4, 0, PF_SOFTFADE, this.r() * 6, (this.r() - 0.5) * 1.5, 0, 0.12);
+    }
+    const motes = Math.ceil(10 * aft * room);
+    for (let i = 0; i < motes; i++) {
+      const a = this.r() * Math.PI * 2;
+      const rr = Math.sqrt(this.r()) * r * 0.8;
+      ps.emit(x + Math.cos(a) * rr, 0.2, z + Math.sin(a) * rr, 0, 1.5 + this.r() * 1.5, 0, 0.8 + this.r() * 0.4, 0.22, 0.06, 0xfff4d0, c, 2.8, Frame.GLOW, 1, 0.5, 1, 0.03, PF_FLICKER, 0, 0, 0.12 + this.r() * 0.25);
+    }
+    if (evolved && !aftershock && !stacked) {
+      this.column(x, 0, z, 0.9, 16, 0xfff4c0, 1.4, 0.45);
+      ps.emit(x, 1.4, z, 0, 0, 0, 0.26, 0.8, 2.6, 0xffffff, 0xffd27a, 1.4 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r());
+    }
+    if (!stacked) this.light(x, 1.5, z, c, evolved ? 10 : 8, r * 2, 0.3);
+  }
+
+  /**
+   * Lighthouse beam (every frame per beam): soft cone + white-hot core from a lens just outside the bearer, a light
+   * pool swept along the ground and a flare where the beam ends. (cx, cz) = unit direction.
+   */
+  lighthouseBeam(px: number, pz: number, cx: number, cz: number, len: number, w: number, evolved: boolean, t: number): void {
+    const c = evolved ? 0xff7ad0 : 0x7ac8ff;
+    const hot = evolved ? 0xfff0c0 : 0xe6f6ff;
+    const ax = px + cx * 0.65, az = pz + cz * 0.65;
+    const bx = px + cx * len, bz = pz + cz * len;
+    this.beam(ax, 1.05, az, bx, 0.75, bz, w * 1.4, w * 4.2, c, 0.75, 0.7, 0.18, 0.12);
+    this.beam(ax, 1.05, az, bx, 0.75, bz, w * 0.4, w * 0.9, hot, 1.5, 0.95, 0.1, 0.9);
+    for (let k = 1; k <= 3; k++) {
+      const f = k / 3.6;
+      this.groundGlow(px + cx * len * f, pz + cz * len * f, w * 2.2 + len * f * 0.55, c, 0.2);
+    }
+    this.glow(ax, 1.05, az, 0.85, hot, 2.2, Frame.CORE);
+    this.glow(bx, 0.75, bz, 1.3, c, 1.0, Frame.FLARE, t * 2);
+    if (evolved) this.glow(bx, 0.75, bz, 1.1, 0xffe08a, 1.2, Frame.STAR, -t * 3);
+  }
+
+  /** Solar Crown orb (every frame): a little sun — golden halo, rotating rays, white-hot core, golden flame licks. */
+  sunOrb(x: number, y: number, z: number, s: number, dt: number, spin: number): void {
+    this.glow(x, y, z, 1.7 * s, 0xff9a20, 0.45);
+    this.glow(x, y, z, 1.6 * s, 0xffe08a, 1.1, Frame.STAR, spin);
+    this.glow(x, y, z, 0.7 * s, 0xffffff, 2.2, Frame.CORE);
+    const ps = this.particles;
+    if (dt > 0 && this.r() < 30 * dt * (1 - ps.pressure)) {
+      ps.emit(x + (this.r() - 0.5) * 0.2, y + 0.1, z + (this.r() - 0.5) * 0.2, (this.r() - 0.5) * 0.6, 1.4 + this.r(), (this.r() - 0.5) * 0.6, 0.3, 0.6 * s, 0.15, 0xfff0b0, 0xff7a10, 2.6, Frame.FLAME, 1, 1, 1, 0, PF_FLICKER, (this.r() - 0.5) * 0.5);
+    }
+  }
+
+  /** Sunspear impact: a golden starburst, shock ring and flame licks. */
+  sunBurst(x: number, z: number, r: number): void {
+    const ps = this.particles;
+    this.ground.add(GM_SHOCK, x, z, 0.2, r, 0.24, 0xffe08a, 1.6, 0.12);
+    this.ground.add(GM_GLOW, x, z, r * 0.5, r, 0.3, 0xffb040, 0.3);
+    ps.emit(x, 1, z, 0, 0, 0, 0.16, 0.5, r, 0xffffff, 0xffd27a, 1.4 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r() * 6);
+    if (ps.pressure > 0.8) return;
+    for (let i = 0; i < 6; i++) {
+      const a = this.r() * Math.PI * 2;
+      const sp = 5 + this.r() * 6;
+      ps.emit(x, 1, z, Math.cos(a) * sp, 2 + this.r() * 3, Math.sin(a) * sp, 0.28, 0.22, 0.06, 0xffffff, 0xffc04a, 3, Frame.STREAK, 1, -12, 2, 0.05, PF_BOUNCE);
+    }
+    for (let i = 0; i < 3; i++) ps.emit(x, 0.6, z, (this.r() - 0.5) * 2, 2 + this.r() * 2, (this.r() - 0.5) * 2, 0.35, 0.6, 0.15, 0xfff0b0, 0xff5a10, 2.6, Frame.FLAME, 1, 1, 2, 0, PF_FLICKER, this.r() - 0.5);
+  }
+
+  /** Sunspear volley loosed: golden muzzle + a sun-sigil flash at the hand. */
+  sunVolley(x: number, z: number, dx: number, dz: number): void {
+    this.muzzle(x + dx * 0.7, 1.4, z + dz * 0.7, dx, dz, 0xffe08a, 1.7);
+    this.ground.add(GM_SHOCK, x + dx * 0.8, z + dz * 0.8, 0.2, 1.4, 0.2, 0xffd27a, 1.6, 0.08);
+  }
+
+  /** Dawnbreak anticipation (every frame in the last ~0.35 s before a pulse; p = 0 → 1): light gathers inward. */
+  dawnGather(x: number, z: number, r: number, p: number): void {
+    this.groundGlow(x, z, 2 * (r * (1 - p * 0.8) + 0.6), 0xffe0a0, 0.35 + 1.1 * p, Frame.RING, p * 2);
+    this.groundGlow(x, z, 3 + 2 * p, 0xffd27a, 0.25 + 0.4 * p);
+    const ps = this.particles;
+    if (this.r() < 0.7 && ps.pressure < 0.85) {
+      const a = this.r() * Math.PI * 2;
+      const d = r * (0.5 + 0.5 * this.r());
+      ps.emit(x + Math.cos(a) * d, 0.3 + this.r() * 0.5, z + Math.sin(a) * d, -Math.cos(a) * d / 0.32, 0.6, -Math.sin(a) * d / 0.32, 0.3, 0.28, 0.12, 0xfff4d0, 0xffc04a, 2.8, Frame.STREAK, 1, 0, 0, 0.03);
+    }
+  }
+
+  /** Dawnbreak pulse: a sunrise ring with ground sun-rays and a rune that lingers (echo = the softer second pulse). */
+  dawnPulse(x: number, z: number, r: number, echo: boolean): void {
+    this.shockwave(x, z, r, echo ? 0xfff6d8 : 0xffd890);
+    const ps = this.particles;
+    if (!echo) {
+      this.ground.add(GM_RUNE, x, z, 1.4, 3.2, 1.0, 0xffd27a, 1.6, 0.12);
+      this.ground.add(GM_GLOW, x, z, r * 0.3, r * 0.6, 0.6, 0xffb040, 0.4);
+    }
+    const n = Math.ceil((echo ? 10 : 18) * (1 - ps.pressure * 0.7));
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const sp = r * 3.2;
+      ps.emit(x + Math.cos(a) * 1.2, 0.3, z + Math.sin(a) * 1.2, Math.cos(a) * sp, 0, Math.sin(a) * sp, 0.3, 0.55, 0.2, 0xffffff, 0xffd27a, 2.6, Frame.STREAK, 1, 0, 3, 0.09);
+    }
+  }
+
+  /** Tempest Choir: a bolt from the sky onto the first target of a storm. */
+  stormStrike(x: number, z: number): void {
+    const jx = (this.r() - 0.5) * 3, jz = (this.r() - 0.5) * 3;
+    this.lightning(x + jx, 12, z + jz, x, 0.9, z, 0xfff4d0, 0.55, 0.3);
+    this.ground.add(GM_SHOCK, x, z, 0.3, 2.6, 0.3, 0xc0e8ff, 2.2, 0.12);
+    this.ground.add(GM_GLOW, x, z, 1.2, 2.4, 0.35, 0xc0e8ff, 0.6);
+    this.light(x, 2, z, 0xc0e8ff, 24, 10, 0.25);
+  }
+
+  /** Stunned by the storm: a couple of sparkles over the target's head. */
+  stunSpark(x: number, z: number): void {
+    const ps = this.particles;
+    if (ps.pressure > 0.75) return;
+    ps.emit(x, 1.9, z, (this.r() - 0.5) * 1.5, 0.6, (this.r() - 0.5) * 1.5, 0.45, 0.35, 0.1, 0xffffff, 0xc0e8ff, 2.6, Frame.STAR, 1, -1, 1, 0, PF_FLICKER, this.r() * 6, 4);
+  }
+
+  /** Beacon Ray loosed: star flares where each ray leaves the bearer, plus a golden ground ring. */
+  beaconFlare(x: number, z: number, a0: number, n: number): void {
+    const ps = this.particles;
+    for (let i = 0; i < n; i++) {
+      const a = a0 + (i / n) * Math.PI * 2;
+      const fx = x + Math.cos(a) * 1.1, fz = z + Math.sin(a) * 1.1;
+      ps.emit(fx, 1.1, fz, Math.cos(a) * 4, 0, Math.sin(a) * 4, 0.16, 0.6, 2.0, 0xffffff, 0xffe08a, 2.2 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, a);
+    }
+    this.ground.add(GM_SHOCK, x, z, 0.6, 3.2, 0.3, 0xffe8b0, 1.8, 0.1);
+  }
+
+  /** Pyre Garden: a fire pool plus a golden garden-sigil around it that burns for its lifetime. */
+  pyreBloom(x: number, z: number, r: number, life: number): void {
+    this.firePool(x, z, r, life);
+    this.ground.add(GM_RUNE, x, z, r * 0.92, r * 1.02, life, 0xffa040, 0.9, 0.05);
+  }
+
+  /** Standing in your own garden: warm golden motes rise around the bearer's feet. */
+  warmth(x: number, z: number): void {
+    const ps = this.particles;
+    for (let i = 0; i < 3; i++) {
+      const a = this.r() * Math.PI * 2;
+      ps.emit(x + Math.cos(a) * 0.7, 0.2, z + Math.sin(a) * 0.7, 0, 1.5 + this.r(), 0, 0.7, 0.22, 0.05, 0xfff4d0, 0xffd27a, 2.6, Frame.SPARKLE, 1, 0, 1, 0, PF_FLICKER, this.r() * 6);
+    }
+  }
+
+  /** Glacier Heart shatter: ice shards burst out of a frozen shadow. */
+  shatter(x: number, z: number, r: number): void {
+    const ps = this.particles;
+    this.ground.add(GM_SHOCK, x, z, 0.2, r, 0.28, 0xa0e8ff, 2.2, 0.12);
+    ps.emit(x, 0.9, z, 0, 0, 0, 0.14, 0.6, r * 1.1, 0xffffff, 0xb8f0ff, 2 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r() * 6);
+    this.frostPuff(x, 0.8, z, 4, 0.7);
+    if (ps.pressure > 0.8) return;
+    for (let i = 0; i < 8; i++) {
+      const a = this.r() * Math.PI * 2;
+      const sp = 4 + this.r() * 5;
+      ps.emit(x, 0.9, z, Math.cos(a) * sp, 3 + this.r() * 4, Math.sin(a) * sp, 0.55 + this.r() * 0.3, 0.35, 0.2, 0xffffff, 0x9ae8ff, 2.4, Frame.SHARD, 1, -16, 0.8, 0, PF_BOUNCE, this.r() * 6, (this.r() - 0.5) * 16);
+    }
+  }
+
+  /** Glacier Heart volley: a frost sigil and icy burst at the bearer's feet. */
+  glacierNova(x: number, z: number): void {
+    this.ground.add(GM_RUNE, x, z, 1.2, 2.6, 0.55, 0xb8f0ff, 1.4, 0.1);
+    this.ground.add(GM_SHOCK, x, z, 0.4, 3.4, 0.35, 0xd8f8ff, 2, 0.12);
+    this.frostPuff(x, 0.6, z, 6, 0.8);
+  }
+
   // ======================================================================== frame
   update(dt: number): void {
     const now = performance.now();
@@ -537,8 +935,28 @@ export class FxManager {
     this.time += realDt;
     this.hitBudget = 28;
     // no glow() call since the last simulated frame → the owners stopped drawing: drop the stale set
-    if (dt > 0 && this.immFresh) this.immCount = 0;
+    if (dt > 0 && this.immFresh) {
+      this.immCount = 0;
+      this.immSLen = 0;
+    }
+    this.flashCheck -= realDt;
+    if (this.flashCheck <= 0) {
+      this.flashCheck = 0.5;
+      const cls = typeof document !== 'undefined' && document.documentElement.classList.contains('a11y-noflash');
+      const reduced = this.reducedFlashing || cls;
+      this.flashK = reduced ? 0.35 : 1;
+      this.bolts.steady = reduced;
+      this.ground.flashEnd = reduced ? 1 : 1.6;
+    }
 
+    // brightness governor: when the screen fills with additive light (hundreds of hits, stacked evolutions),
+    // every additive layer is scaled down a little so the scene never washes out to white
+    const load = this.particles.pressure * 0.7 + Math.min(1, this.immCount / 300) * 0.3;
+    const gainT = 1 - 0.4 * Math.min(1, Math.max(0, (load - 0.2) / 0.5));
+    this.gain += (gainT - this.gain) * Math.min(1, realDt * 4);
+    this.particles.gain = this.gain;
+    this.ground.gain = this.gain;
+    this.fire.gain = this.gain;
     this.fire.update(dt, this.particles);
     this.particles.update(dt, realDt);
     this.ground.update(dt, realDt);
@@ -546,6 +964,12 @@ export class FxManager {
     this.strips.begin(this.camera);
     this.bolts.update(dt, this.strips);
     this.ribbons.update(dt, this.strips);
+    const sb = this.immS;
+    for (let o = 0; o < this.immSLen; ) {
+      const n = sb[o];
+      this.strips.strip(sb, n, sb[o + 1], sb[o + 2], sb[o + 3], sb[o + 4], sb[o + 5], sb[o + 6], sb[o + 7], o + IS_H);
+      o += IS_H + n * 3;
+    }
     this.strips.end();
 
     // billboards: light columns + immediate glows
@@ -570,8 +994,12 @@ export class FxManager {
     }
     const m = this.imm;
     for (let j = 0; j < this.immCount; j++) {
-      const o = j * 7;
-      b.add(m[o], m[o + 1], m[o + 2], m[o + 3], m[o + 4], m[o + 5], m[o + 6]);
+      const o = j * IMM_F;
+      const kind = m[o + 8];
+      const g = m[o + 6] * this.gain;
+      if (kind === IK_GLOW) b.add(m[o], m[o + 1], m[o + 2], m[o + 3], m[o + 4], m[o + 5], g, m[o + 9], m[o + 7]);
+      else if (kind === IK_GROUND) b.ground(m[o], m[o + 1], m[o + 2], m[o + 3], m[o + 4], m[o + 5], g, m[o + 9], m[o + 7]);
+      else b.column(m[o], m[o + 1], m[o + 2], m[o + 3], m[o + 7], m[o + 5], g, m[o + 9]);
     }
     b.end();
     // glows queued during this sim step are consumed; while paused (dt = 0) keep showing the last set
@@ -636,6 +1064,7 @@ export class FxManager {
     this.fire.clear();
     this.colCount = 0;
     this.immCount = 0;
+    this.immSLen = 0;
     this.strips.begin(this.camera);
     this.strips.end();
     this.boards.begin(this.time);

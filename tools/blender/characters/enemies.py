@@ -505,12 +505,13 @@ def bloater():
         band = 0.5 + 0.5 * math.cos((p.y - 0.1) * 12.0)
         c = mix(c, 0x7a1e3a, smooth(0.82, 0.95, band) * 0.85)  # burgundy plate seams
         c = mix(c, 0xfff0a0, smooth(0.8, 1.0, n.z) * 0.35)
-        if p.y < -0.25:  # head: burgundy
-            c = mix(0x5c1830, 0x9a3050, smooth(-0.3, 0.9, n.z))
         return c
 
+    def head_p(p, n):
+        return mix(0x5c1830, 0xa83a5a, smooth(-0.3, 0.9, n.z))  # burgundy head, lit crown
+
     paint(abd, painter)
-    paint(head, painter)
+    paint(head, head_p)
     for y0, dy in ((-0.22, -0.28), (0.06, 0.0), (0.34, 0.26)):
         def mk(y0=y0, dy=dy):
             return tube('bloater_leg', leg, bez((0.26, y0, 0.36), (0.6, y0 + dy * 0.5, 0.5), (0.62, y0 + dy, 0.0), 4),
@@ -521,7 +522,7 @@ def bloater():
     # glowing seams between the plates (thin rings hugging the abdomen)
     for yy, rr in ((-0.16, 0.38), (0.1, 0.46), (0.36, 0.38)):
         objs.append(part('bloater_seam', 'torus', ember, loc=(0, yy, 0.64), size=(1.0, 1.0, 0.95), rot=(90, 0, 0), sub=0,
-                         args={'major': rr, 'minor': 0.022, 'seg': 14, 'mseg': 3}))
+                         args={'major': rr, 'minor': 0.02, 'seg': 12, 'mseg': 3}))
     spark = glow('bloater_spark', 0xffe08a, strength=2.0)
     objs.append(part('bloater_spark', 'sphere', spark, loc=(0.11, 0.35, 1.28), size=0.075, sub=0, args={'seg': 6, 'rings': 4}))
     em = eye('bloater', 0xfff2a0)
