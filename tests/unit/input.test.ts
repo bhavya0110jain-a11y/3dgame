@@ -49,3 +49,69 @@ describe('Input touch stick (BUG-QA-004 regression)', () => {
     expect(input.moveZ).toBeCloseTo(0, 5);
   });
 });
+
+type KeyInternals = { pressedThisFrame: Set<string> };
+type PadButton = { pressed: boolean };
+
+describe('Input pressed-this-frame (BUG-QA-008 fixed-arity anyPressed)', () => {
+  it('anyPressed_oneToThreeCodes_matchesAnyPosition', () => {
+    const input = new Input({ addEventListener: noop } as unknown as HTMLElement);
+    (input as unknown as KeyInternals).pressedThisFrame.add('KeyP');
+    expect(input.anyPressed('KeyP')).toBe(true);
+    expect(input.anyPressed('Escape', 'KeyP')).toBe(true);
+    expect(input.anyPressed('Escape', 'Pad9', 'KeyP')).toBe(true);
+    expect(input.anyPressed('Escape', 'Pad9')).toBe(false);
+  });
+
+  it('endFrame_afterPress_clearsPressed', () => {
+    const input = new Input({ addEventListener: noop } as unknown as HTMLElement);
+    (input as unknown as KeyInternals).pressedThisFrame.add('Space');
+    input.endFrame();
+    expect(input.anyPressed('Space')).toBe(false);
+  });
+
+  it('gamepadButton_heldAcrossFrames_reportsPressOnlyOnEdge', () => {
+    // Arrange: a standard pad with button 0 held
+    const buttons: PadButton[] = Array.from({ length: 17 }, () => ({ pressed: false }));
+    const pad = { axes: [0, 0], buttons };
+    const nav = globalThis.navigator as unknown as { getGamepads?: () => unknown[] };
+    const prev = nav.getGamepads;
+    nav.getGamepads = () => [null, pad];
+    try {
+      const input = new Input({ addEventListener: noop } as unknown as HTMLElement);
+      buttons[0].pressed = true;
+      // Act + Assert
+      input.update();
+      expect(input.pressed('Pad0')).toBe(true);
+      expect(input.usingGamepad).toBe(true);
+      input.endFrame();
+      input.update();
+      expect(input.pressed('Pad0')).toBe(false); // still held: no new press
+      buttons[0].pressed = false;
+      input.endFrame();
+      input.update();
+      buttons[0].pressed = true;
+      input.endFrame();
+      input.update();
+      expect(input.pressed('Pad0')).toBe(true); // released and pressed again
+    } finally {
+      nav.getGamepads = prev;
+    }
+  });
+
+  it('gamepadDpad_down_movesWithoutStick', () => {
+    const buttons: PadButton[] = Array.from({ length: 17 }, () => ({ pressed: false }));
+    buttons[15].pressed = true; // d-pad right
+    const nav = globalThis.navigator as unknown as { getGamepads?: () => unknown[] };
+    const prev = nav.getGamepads;
+    nav.getGamepads = () => [{ axes: [0, 0], buttons }];
+    try {
+      const input = new Input({ addEventListener: noop } as unknown as HTMLElement);
+      input.update();
+      expect(input.moveX).toBe(1);
+      expect(input.moveZ).toBe(0);
+    } finally {
+      nav.getGamepads = prev;
+    }
+  });
+});

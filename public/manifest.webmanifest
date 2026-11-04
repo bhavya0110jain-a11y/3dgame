@@ -1,0 +1,29 @@
+{
+  "name": "Last Lantern",
+  "short_name": "Last Lantern",
+  "description": "Carry the last light through a moonlit night that wants it out.",
+  "version": "0.1.0",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#0b0820",
+  "theme_color": "#120b2e",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

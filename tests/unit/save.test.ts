@@ -102,7 +102,7 @@ describe('Save: write', () => {
  * field types; when the fix lands vitest reports them as unexpectedly passing — flip them to `it`.
  */
 describe('Save: corrupt field types (known bug BUG-QA-005)', () => {
-  it.fails('loadSave_unlockedNull_fallsBackToDefaultUnlocks', () => {
+  it('loadSave_unlockedNull_fallsBackToDefaultUnlocks', () => {
     store.data.set(KEY, JSON.stringify({ version: 1, unlocked: null, meta: null }));
     const s = loadSave();
     expect(Array.isArray(s.unlocked)).toBe(true);
@@ -110,12 +110,12 @@ describe('Save: corrupt field types (known bug BUG-QA-005)', () => {
     expect(s.meta).not.toBeNull();
   });
 
-  it.fails('loadSave_unknownQualityTier_fallsBackToDefaultTier', () => {
+  it('loadSave_unknownQualityTier_fallsBackToDefaultTier', () => {
     store.data.set(KEY, JSON.stringify({ version: 1, settings: { quality: 'ultra' } }));
     expect(['low', 'medium', 'high']).toContain(loadSave().settings.quality);
   });
 
-  it.fails('loadSave_nonNumericAsh_fallsBackToZero', () => {
+  it('loadSave_nonNumericAsh_fallsBackToZero', () => {
     store.data.set(KEY, JSON.stringify({ version: 1, ash: 'lots', bestTime: null }));
     const s = loadSave();
     expect(Number.isFinite(s.ash)).toBe(true);

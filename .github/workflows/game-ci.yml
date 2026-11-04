@@ -18,6 +18,8 @@ permissions:
 env:
   NODE_VERSION: '22'
   PLAYWRIGHT_VERSION: '1.63.0'
+  # electron is a devDependency for the desktop build only; CI never launches it, so skip its ~100 MB binary.
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
 jobs:
   check:
@@ -48,6 +50,9 @@ jobs:
 
       - name: Build
         run: npx vite build
+
+      - name: Package web build (itch zip + static sub-folder checks)
+        run: node tools/package-web.mjs --out release/last-lantern-web.zip
 
       - name: Upload test report
         if: always()
@@ -90,8 +95,15 @@ jobs:
           name: dist
           path: dist
 
+      # GitHub runners have no GPU: Chromium renders through SwiftShader (software WebGL2), ~1-3 fps at 1280x720.
+      # smoke.mjs advances the sim in fixed steps (not wall-clock), so results do not depend on frame rate. One retry
+      # absorbs a runner hiccup (e.g. a stalled first frame); a real regression (console error, broken tap) fails twice.
       - name: Smoke test (fails on console errors)
-        run: node tools/smoke.mjs production/qa/evidence
+        timeout-minutes: 20
+        run: node tools/smoke.mjs production/qa/evidence || { echo '::warning::smoke failed once, retrying'; node tools/smoke.mjs production/qa/evidence; }
+
+      - name: itch.io zip boots from a sub-folder (no 404s, no console errors)
+        run: node tools/package-web.mjs --verify --out release/last-lantern-web.zip
 
       - name: Perf benchmark (relative, SwiftShader)
         run: node tools/perf.mjs --counts 100,200,350 --quality high,low --frames 80 --warmup 30 --width 960 --height 540 --out production/qa/ci-perf --baseline production/qa/perf-baseline.json

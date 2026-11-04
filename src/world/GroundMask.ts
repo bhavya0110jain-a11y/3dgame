@@ -18,40 +18,69 @@ function ihash(x: number, y: number, s: number): number {
   return (h >>> 0) / 4294967296;
 }
 
-/** Periodic value noise (period in lattice cells) evaluated at u,v in [0,1) of the tile. */
-function pnoise(u: number, v: number, period: number, seed: number): number {
-  const x = u * period;
-  const y = v * period;
+/**
+ * Periodic value-noise lattice (period x period hashed corner values), precomputed once per (period, seed) so the
+ * per-pixel noise is 4 table reads + a bilinear smoothstep instead of 4 integer hashes. Values are bit-identical to
+ * hashing on the fly (same ihash), so CPU prop placement and the GPU mask still agree.
+ */
+class Lattice {
+  readonly t: Float32Array;
+  constructor(readonly p: number, seed: number) {
+    this.t = new Float32Array(p * p);
+    for (let y = 0; y < p; y++) for (let x = 0; x < p; x++) this.t[y * p + x] = ihash(x, y, seed);
+  }
+}
+
+/** Periodic value noise at u,v in tile space (any real; wrapped). */
+function lnoise(L: Lattice, u: number, v: number): number {
+  const p = L.p;
+  const x = u * p;
+  const y = v * p;
   const xi = Math.floor(x);
   const yi = Math.floor(y);
   let fx = x - xi;
   let fy = y - yi;
   fx = fx * fx * (3 - 2 * fx);
   fy = fy * fy * (3 - 2 * fy);
-  const x0 = ((xi % period) + period) % period;
-  const y0 = ((yi % period) + period) % period;
-  const x1 = (x0 + 1) % period;
-  const y1 = (y0 + 1) % period;
-  const a = ihash(x0, y0, seed);
-  const b = ihash(x1, y0, seed);
-  const c = ihash(x0, y1, seed);
-  const d = ihash(x1, y1, seed);
+  let x0 = xi % p;
+  if (x0 < 0) x0 += p;
+  let y0 = yi % p;
+  if (y0 < 0) y0 += p;
+  const x1 = x0 + 1 === p ? 0 : x0 + 1;
+  const y1 = y0 + 1 === p ? 0 : y0 + 1;
+  const t = L.t;
+  const a = t[y0 * p + x0];
+  const b = t[y0 * p + x1];
+  const c = t[y1 * p + x0];
+  const d = t[y1 * p + x1];
   return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
 }
 
-function pfbm(u: number, v: number, period: number, seed: number, oct: number): number {
-  let sum = 0;
-  let amp = 0.5;
-  let norm = 0;
-  let p = period;
-  for (let i = 0; i < oct; i++) {
-    sum += amp * pnoise(u, v, p, seed + i * 31);
-    norm += amp;
-    amp *= 0.5;
-    p *= 2;
+/** fBm over precomputed octaves (period doubles, seed + i*31 per octave, amplitude halves). */
+class Fbm {
+  private oct: Lattice[] = [];
+  private norm = 0;
+  constructor(period: number, seed: number, octaves: number) {
+    let amp = 0.5;
+    for (let i = 0; i < octaves; i++) {
+      this.oct.push(new Lattice(period << i, seed + i * 31));
+      this.norm += amp;
+      amp *= 0.5;
+    }
   }
-  return sum / norm;
+  at(u: number, v: number): number {
+    let sum = 0;
+    let amp = 0.5;
+    for (let i = 0; i < this.oct.length; i++) {
+      sum += amp * lnoise(this.oct[i], u, v);
+      amp *= 0.5;
+    }
+    return sum / this.norm;
+  }
 }
+
+/** Fields kept per seed (each 1 MiB): the menu glade (seed 1) + the last couple of runs never regenerate. */
+const CACHE_MAX = 3;
 
 export class GroundMask {
   readonly data = new Uint8Array(MASK_SIZE * MASK_SIZE * 4);
@@ -67,22 +96,51 @@ export class GroundMask {
     this.texture.colorSpace = THREE.NoColorSpace;
   }
 
-  /** Regenerates the field for a biome/seed (~60-90 ms, once per run). */
+  private cache = new Map<number, Uint8Array>();
+  private current = NaN;
+
+  /**
+   * Regenerates the field for a seed. Precomputed noise lattices keep this to roughly a quarter of the old
+   * hash-per-sample cost; results are cached per seed (LRU, CACHE_MAX), so the menu glade and biome re-entry are
+   * a 1 MiB memcpy. Same seed → same bytes, always.
+   */
   generate(seed: number): void {
+    if (seed === this.current) return;
+    const hit = this.cache.get(seed);
+    if (hit) {
+      this.data.set(hit);
+      this.cache.delete(seed); // refresh LRU order
+      this.cache.set(seed, hit);
+    } else {
+      this.build(seed);
+      if (this.cache.size >= CACHE_MAX) this.cache.delete(this.cache.keys().next().value as number);
+      this.cache.set(seed, this.data.slice());
+    }
+    this.current = seed;
+    this.texture.needsUpdate = true;
+  }
+
+  private build(seed: number): void {
     const s = (seed * 7919) | 0;
     const N = MASK_SIZE;
     const d = this.data;
+    const warpU = new Lattice(4, s + 5);
+    const warpV = new Lattice(4, s + 9);
+    const patchF = new Fbm(4, s + 1, 4);
+    const pathF = new Fbm(2, s + 2, 3);
+    const wetF = new Fbm(5, s + 3, 4);
+    const detF = new Fbm(16, s + 4, 2);
     for (let j = 0; j < N; j++) {
       const v = j / N;
       for (let i = 0; i < N; i++) {
         const u = i / N;
         // domain warp so paths meander
-        const wu = u + (pnoise(u, v, 4, s + 5) - 0.5) * 0.08;
-        const wv = v + (pnoise(u, v, 4, s + 9) - 0.5) * 0.08;
-        const patch = pfbm(u, v, 4, s + 1, 4);
-        const path = pfbm(wu, wv, 2, s + 2, 3);
-        const wet = pfbm(wu, wv, 5, s + 3, 4);
-        const det = pfbm(u, v, 16, s + 4, 2);
+        const wu = u + (lnoise(warpU, u, v) - 0.5) * 0.08;
+        const wv = v + (lnoise(warpV, u, v) - 0.5) * 0.08;
+        const patch = patchF.at(u, v);
+        const path = pathF.at(wu, wv);
+        const wet = wetF.at(wu, wv);
+        const det = detF.at(u, v);
         const k = (j * N + i) * 4;
         d[k] = Math.round(Math.min(1, Math.max(0, (patch - 0.5) * 1.8 + 0.5)) * 255);
         d[k + 1] = Math.round(Math.min(1, Math.max(0, (path - 0.5) * 2.2 + 0.5)) * 255);
@@ -90,7 +148,6 @@ export class GroundMask {
         d[k + 3] = Math.round(det * 255);
       }
     }
-    this.texture.needsUpdate = true;
   }
 
   /** Bilinear sample of one channel (0..3) at world x,z — matches the GPU's LinearFilter at mip 0. */

@@ -83,7 +83,7 @@ describe('Rng', () => {
   // BUG-QA-006 (S4): `this.s += 0x6d2b79f5` is never wrapped to uint32, so after ~4.9M calls the float state
   // exceeds 2^53 and stops matching mulberry32. Fix in src/core/Rng.ts: `this.s = (this.s + 0x6d2b79f5) >>> 0`
   // (identical output before the precision loss). Flip `it.fails` → `it` once fixed.
-  it.fails('next_afterFiveMillionCalls_stillMatchesUint32Reference', () => {
+  it('next_afterFiveMillionCalls_stillMatchesUint32Reference', () => {
     const ref = (seed: number) => {
       let s = seed >>> 0;
       return () => {

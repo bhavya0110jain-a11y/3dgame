@@ -435,3 +435,166 @@ def knight():
 
 
 knight.finish = {'ao_strength': 0.55}
+
+
+# ============================================================================================ BLOB (Gloam Jelly / Jellyling)
+def blob():
+    """Gloam Jelly: a wobbling rose-pink gumdrop jelly with a curled drip-topknot, a candy-light crown, huge
+    round moon-white eyes with a shy smile, little nub arms and glowing magenta bubbles floating in its skin.
+    Splits into jellylings (same model at 0.65 scale), so the silhouette must read tiny too: round + topknot."""
+    skin = body_mat('blob_skin')
+    objs = []
+
+    def gum(v):
+        # gumdrop: flat sole, slightly bulging hips, soft peak at the top
+        z = max(v.z, -0.36)
+        k = 1.0 + 0.1 * smooth(-0.36, -0.1, z) * (1.0 - smooth(-0.1, 0.25, z))
+        return Vector((v.x * k, v.y * k, z + 0.08 * smooth(0.25, 0.45, v.z) * (1.0 - min(1.0, (v.x * v.x + v.y * v.y) * 8))))
+
+    body = part('blob_body', 'sphere', skin, loc=(0, 0, 0.42), size=(0.56, 0.52, 0.46), sub=1, args={'seg': 14, 'rings': 9}, deform=gum)
+    objs.append(body)
+    top = tube('blob_topknot', skin, bez((0, 0.02, 0.84), (0.0, 0.1, 1.08), (0.0, 0.32, 1.02), 6),
+               [0.13, 0.11, 0.085, 0.06, 0.04, 0.0], seg=8, sub=1)
+    objs.append(top)
+    objs += sym(lambda: tube('blob_nub', skin, bez((0.46, -0.08, 0.42), (0.62, -0.14, 0.4), (0.64, -0.24, 0.3), 4),
+                             [0.1, 0.085, 0.06, 0.0], seg=7, sub=1))
+    face_dark = (0.30, 0.04, 0.22)
+
+    def painter(p, n):
+        c = mix(0xc8286e, 0xff7cbc, smooth(0.0, 0.75, p.z))  # raspberry sole -> bubblegum crown
+        c = mix(c, 0xffc6e4, smooth(0.45, 1.0, n.z) * 0.6)  # candy-light top
+        c = mix(c, 0xff9ad0, smooth(0.2, 0.8, -n.y) * smooth(0.12, 0.3, p.z) * 0.35)  # lighter face
+        # small smile under the eyes
+        mz = 0.36 + 0.9 * p.x * p.x
+        m = (1.0 - smooth(0.012, 0.03, abs(p.z - mz))) * smooth(-0.3, -0.7, n.y) * (1.0 - smooth(0.1, 0.14, abs(p.x)))
+        c = mix(c, face_dark, m)
+        # rosy cheeks
+        ch = 1.0 - smooth(0.0, 0.06, math.hypot(abs(p.x) - 0.27, p.z - 0.42) - 0.05)
+        c = mix(c, 0xff5a8a, ch * smooth(-0.2, -0.6, n.y) * 0.6)
+        return c
+
+    for o in objs:
+        paint(o, painter)
+    bub = glow('blob_bubble', 0xff7af0)
+    for x, y, z, r in ((0.3, 0.28, 0.68, 0.075), (-0.36, 0.18, 0.5, 0.06), (0.12, 0.42, 0.34, 0.055), (-0.16, 0.3, 0.8, 0.05)):
+        objs.append(part('blob_bubble', 'sphere', bub, loc=(x, y, z), size=r, sub=0, args={'seg': 6, 'rings': 4}))
+    em = eye('blob', 0xfff0ff)
+    objs += eye_pair(em, 0.17, -0.5, 0.56, (0.1, 0.05, 0.12), tilt=-6, seg=8, rings=6, on=[body], sink=0.45)
+    return objs
+
+
+blob.finish = {'ao_strength': 0.5}
+
+
+# ============================================================================================ BLOATER (Cinder Tick)
+def bloater():
+    """Cinder Tick: a skittering tick with a huge swollen ochre-gold abdomen banded with burgundy plates and
+    split by glowing ember seams, a lit fuse-wick on its back (it explodes), a small burgundy head with two big
+    pale-gold eyes and six stubby legs. Reads as 'danger, will pop' from across the arena."""
+    shell = body_mat('bloater_shell')
+    leg = material('bloater_leg', 0x5c1830, rough=0.5)
+    objs = []
+    abd = part('bloater_abd', 'sphere', shell, loc=(0, 0.1, 0.62), size=(0.46, 0.5, 0.44), sub=1, args={'seg': 14, 'rings': 9},
+               deform=lambda v: Vector((v.x * (1.0 + 0.08 * math.cos(v.y * 12.0)), v.y, v.z * (1.0 + 0.06 * math.cos(v.y * 12.0)))))
+    head = part('bloater_head', 'sphere', shell, loc=(0, -0.42, 0.42), size=(0.24, 0.2, 0.18), sub=1, args={'seg': 10, 'rings': 6})
+    objs += [abd, head]
+
+    def painter(p, n):
+        top = smooth(-0.2, 0.6, n.z)
+        c = mix(0xb86a16, 0xffc23a, smooth(0.2, 1.0, p.z) * 0.6 + top * 0.4)  # ochre -> warm gold
+        band = 0.5 + 0.5 * math.cos((p.y - 0.1) * 12.0)
+        c = mix(c, 0x7a1e3a, smooth(0.82, 0.95, band) * 0.85)  # burgundy plate seams
+        c = mix(c, 0xfff0a0, smooth(0.8, 1.0, n.z) * 0.35)
+        if p.y < -0.25:  # head: burgundy
+            c = mix(0x5c1830, 0x9a3050, smooth(-0.3, 0.9, n.z))
+        return c
+
+    paint(abd, painter)
+    paint(head, painter)
+    for y0, dy in ((-0.22, -0.28), (0.06, 0.0), (0.34, 0.26)):
+        def mk(y0=y0, dy=dy):
+            return tube('bloater_leg', leg, bez((0.26, y0, 0.36), (0.6, y0 + dy * 0.5, 0.5), (0.62, y0 + dy, 0.0), 4),
+                        [0.07, 0.06, 0.045, 0.0], seg=5, sub=1)
+        objs += sym(mk)
+    objs.append(tube('bloater_wick', leg, bez((0, 0.18, 1.02), (0.0, 0.26, 1.2), (0.1, 0.34, 1.26), 4), [0.05, 0.04, 0.032, 0.03], seg=6, sub=1))
+    ember = glow('bloater_ember', 0xff9a22)
+    # glowing seams between the plates (thin rings hugging the abdomen)
+    for yy, rr in ((-0.16, 0.38), (0.1, 0.46), (0.36, 0.38)):
+        objs.append(part('bloater_seam', 'torus', ember, loc=(0, yy, 0.64), size=(1.0, 1.0, 0.95), rot=(90, 0, 0), sub=0,
+                         args={'major': rr, 'minor': 0.022, 'seg': 14, 'mseg': 3}))
+    spark = glow('bloater_spark', 0xffe08a, strength=2.0)
+    objs.append(part('bloater_spark', 'sphere', spark, loc=(0.11, 0.35, 1.28), size=0.075, sub=0, args={'seg': 6, 'rings': 4}))
+    em = eye('bloater', 0xfff2a0)
+    objs += eye_pair(em, 0.1, -0.56, 0.47, (0.075, 0.045, 0.08), tilt=14, seg=8, rings=5, on=[head], sink=0.45)
+    return objs
+
+
+bloater.finish = {'ao_strength': 0.6}
+
+
+# ============================================================================================ WARDEN (Hollow Warden)
+def warden():
+    """Hollow Warden: a tall moonstone sentinel - pale ivory-blue robe with deep-teal trim and mantle, a hood
+    with a dark face and two cyan eyes, a big round teal ward-shield with gold rim and a glowing cyan lantern
+    rune, and a staff hung with a cyan spirit lantern. The only pale enemy: reads instantly as 'the shielded one'."""
+    robe = body_mat('warden_robe')
+    teal = material('warden_teal', WHITE, rough=0.55)
+    gold = material('warden_gold', 0xe8c060, rough=0.35)
+    wood = material('warden_wood', 0x4a3a5a, rough=0.7)
+    objs = []
+    prof = [(0.0, 0.0), (0.02, 0.4), (0.4, 0.36), (0.8, 0.3), (1.1, 0.27), (1.3, 0.24), (1.38, 0.0)]
+    gown = tube('warden_gown', robe, [(0, 0, z) for z, r in prof], [r for z, r in prof], seg=12, sub=1)
+
+    def folds(p):
+        r = math.hypot(p.x, p.y)
+        if r < 1e-4:
+            return p
+        th = math.atan2(p.y, p.x)
+        k = 1.0 + 0.06 * math.cos(6 * th) * (1.0 - smooth(0.1, 0.9, p.z))
+        return Vector((p.x * k, p.y * k, p.z))
+
+    deform_obj(gown, folds)
+    hood = part('warden_hood', 'sphere', robe, loc=(0, 0.02, 1.52), size=(0.26, 0.27, 0.27), sub=1, args={'seg': 12, 'rings': 8},
+                deform=lambda v: Vector((v.x, v.y, v.z + 0.12 * smooth(0.1, 0.27, v.z) * (1.0 - min(1.0, (v.x * v.x) * 30)))))
+    objs += [gown, hood]
+
+    def robe_p(p, n):
+        c = mix(0x8a9cc8, 0xe4ecff, smooth(0.0, 1.4, p.z))  # dusk-blue hem -> moonstone ivory
+        c = mix(c, 0xffffff, smooth(0.55, 1.0, n.z) * 0.35)
+        # deep teal hem band and front panel
+        hem = 1.0 - smooth(0.12, 0.16, p.z)
+        panel = (1.0 - smooth(0.07, 0.1, abs(p.x))) * smooth(-0.3, -0.7, n.y) * (1.0 - smooth(1.05, 1.15, p.z))
+        c = mix(c, 0x1a7a8e, max(hem, panel * 0.9))
+        # dark face hollow
+        fx = (p.x / 0.18) ** 2 + ((p.z - 1.5) / 0.16) ** 2
+        f = (1.0 - smooth(0.5, 1.0, fx)) * smooth(-0.1, -0.5, n.y)
+        return mix(c, (0.04, 0.08, 0.16), f)
+
+    for o in objs:
+        paint(o, robe_p)
+    mantle = tube('warden_mantle', teal, [(0, 0, 1.36), (0, 0, 1.24), (0, 0, 1.1)], [0.25, 0.36, 0.4], seg=12, sub=1, cap=False)
+    paint(mantle, lambda p, n: mix(0x0f5a70, 0x2ab0c0, smooth(-0.3, 0.9, n.z)))
+    objs.append(mantle)
+    objs += sym(lambda: tube('warden_sleeve', robe, [(0.26, -0.02, 1.22), (0.38, -0.12, 1.0), (0.36, -0.3, 0.86)], [0.09, 0.1, 0.11], seg=7, sub=1))
+    for o in objs[-2:]:
+        paint(o, robe_p)
+    # ward-shield on its left arm (+X), held out front
+    sh = part('warden_shield', 'cyl', teal, loc=(0.26, -0.5, 0.86), size=1, rot=(90, 0, 0), sub=1, args={'seg': 14, 'r1': 0.44, 'r2': 0.4, 'depth': 0.08})
+    paint(sh, lambda p, n: mix(0x0e4c66, 0x2a9cb8, smooth(-0.2, 1.0, n.z * 0.5 + 0.5 - n.y * 0.2)))
+    objs.append(sh)
+    objs.append(part('warden_rim', 'torus', gold, loc=(0.26, -0.55, 0.86), size=1, rot=(90, 0, 0), sub=0, args={'major': 0.43, 'minor': 0.035, 'seg': 18, 'mseg': 4}))
+    rune = glow('warden_ward', 0x7af0ff)
+    objs.append(part('warden_rune', 'torus', rune, loc=(0.26, -0.565, 0.86), size=1, rot=(90, 0, 0), sub=0, args={'major': 0.24, 'minor': 0.025, 'seg': 14, 'mseg': 3}))
+    objs.append(part('warden_core', 'sphere', rune, loc=(0.26, -0.56, 0.86), size=(0.11, 0.05, 0.11), sub=0, args={'seg': 8, 'rings': 5}))
+    # staff with spirit lantern in the right hand (-X)
+    objs.append(tube('warden_staff', wood, [(-0.4, -0.3, 0.02), (-0.4, -0.32, 1.0), (-0.42, -0.34, 1.82)], [0.03, 0.034, 0.03], seg=6, sub=0))
+    objs.append(tube('warden_hook', gold, bez((-0.42, -0.34, 1.8), (-0.44, -0.42, 1.96), (-0.56, -0.46, 1.86), 4), [0.025, 0.022, 0.02, 0.02], seg=5, sub=0))
+    objs.append(part('warden_lcap', 'cyl', gold, loc=(-0.56, -0.46, 1.76), size=1, sub=0, args={'seg': 6, 'r1': 0.08, 'r2': 0.04, 'depth': 0.05}))
+    objs.append(part('warden_lamp', 'cyl', rune, loc=(-0.56, -0.46, 1.64), size=1, sub=0, args={'seg': 6, 'r1': 0.065, 'r2': 0.065, 'depth': 0.16}))
+    objs.append(part('warden_lbot', 'cyl', gold, loc=(-0.56, -0.46, 1.54), size=1, sub=0, args={'seg': 6, 'r1': 0.05, 'r2': 0.075, 'depth': 0.04}))
+    em = eye('warden', 0x9af8ff)
+    objs += eye_pair(em, 0.075, -0.3, 1.5, (0.055, 0.03, 0.035), tilt=18, seg=8, rings=5, on=[hood], sink=0.6)
+    return objs
+
+
+warden.finish = {'ao_strength': 0.55}

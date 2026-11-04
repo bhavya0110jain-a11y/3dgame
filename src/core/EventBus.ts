@@ -17,6 +17,16 @@ export type GameEvents = {
   'boss:enraged': { defId: string };
   'enemy:exploded': { x: number; z: number };
   'achievement:unlocked': { id: string; name: string };
+  // --- onboarding / director (Sprint 2) ---
+  /**
+   * First-run onboarding hint (src/game/Tutorial.ts). Fires once per hint id per save, only while save.runs < 2 and
+   * settings.hints is on. `duration` = suggested seconds on screen; `priority` = higher may replace a lower one.
+   */
+  'tutorial:hint': { id: string; text: string; duration: number; priority: number };
+  /** An elite was spawned by the Director (the 'An elite approaches…' moment). */
+  'elite:spawned': { defId: string; x: number; z: number };
+  /** The lantern flared to full light (boss arrival). `amount` = light restored. */
+  'lantern:flare': { amount: number };
 };
 
 type Handler<T> = (payload: T) => void;

@@ -539,6 +539,44 @@ def decimate_to(objs, budget):
     return tri_count(objs)
 
 
+def decimate_each(objs, ratio, min_tris=12, skip_below=20):
+    """Collapse-decimate every mesh by `ratio`, but never below `min_tris` per object; objects with fewer than
+    `skip_below` triangles are left alone. Vertex colour attributes are interpolated by the collapse, so this is
+    safe after finish() (AO already baked into COLOR_0) - used for the horde LOD and the cheap glow parts."""
+    for o in objs:
+        if o.type != 'MESH':
+            continue
+        n = tri_count([o])
+        if n < skip_below:
+            continue
+        target = max(min_tris, int(n * ratio))
+        if target >= n:
+            continue
+        active = o.data.color_attributes.active_color_name if o.data.color_attributes.active_color else None
+        md = o.modifiers.new('dec', 'DECIMATE')
+        md.ratio = target / n
+        md.use_collapse_triangulate = True
+        apply_mods(o)
+        o.data.shade_smooth()
+        if active and o.data.color_attributes.get(active):
+            o.data.color_attributes.active_color = o.data.color_attributes[active]
+            try:
+                o.data.color_attributes.render_color_index = o.data.color_attributes.active_color_index
+            except Exception:
+                pass
+    return tri_count(objs)
+
+
+def decimate_group_to(objs, budget, min_tris=12, skip_below=20):
+    """Decimate a group of meshes to roughly `budget` triangles in total (iterates because of per-object floors)."""
+    for _ in range(3):
+        n = tri_count(objs)
+        if n <= budget * 1.04:
+            break
+        decimate_each(objs, budget / n, min_tris=min_tris, skip_below=skip_below)
+    return tri_count(objs)
+
+
 def export_glb(objs, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     bpy.ops.object.select_all(action='DESELECT')

@@ -1,3 +1,6 @@
+/** Virtual codes for gamepad buttons (standard mapping has 17; extra headroom for odd pads). */
+const PAD_CODES: readonly string[] = Array.from({ length: 24 }, (_, i) => `Pad${i}`);
+
 /** Unified input: keyboard, gamepad and on-screen touch stick. Produces a normalized move vector. */
 export class Input {
   readonly keys = new Set<string>();
@@ -49,8 +52,10 @@ export class Input {
     if (this.touchId !== null) return;
     const t = e.changedTouches[0];
     this.touchId = t.identifier;
-    this.touchOrigin = { x: t.clientX, y: t.clientY };
-    this.touchVec = { x: 0, y: 0 };
+    this.touchOrigin.x = t.clientX;
+    this.touchOrigin.y = t.clientY;
+    this.touchVec.x = 0;
+    this.touchVec.y = 0;
     this.ensureStick();
     if (this.stickEl) {
       this.stickEl.style.display = 'block';
@@ -61,24 +66,30 @@ export class Input {
   }
 
   private onTouchMove(e: TouchEvent): void {
-    for (const t of Array.from(e.changedTouches)) {
+    const list = e.changedTouches;
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i];
       if (t.identifier !== this.touchId) continue;
       const dx = t.clientX - this.touchOrigin.x;
       const dy = t.clientY - this.touchOrigin.y;
       const max = 50;
       const len = Math.hypot(dx, dy);
       const k = len > max ? max / len : 1;
-      this.touchVec = { x: (dx * k) / max, y: (dy * k) / max };
+      this.touchVec.x = (dx * k) / max;
+      this.touchVec.y = (dy * k) / max;
       if (this.knobEl) this.knobEl.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
     }
     e.preventDefault();
   }
 
   private onTouchEnd(e: TouchEvent): void {
-    for (const t of Array.from(e.changedTouches)) {
+    const list = e.changedTouches;
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i];
       if (t.identifier !== this.touchId) continue;
       this.touchId = null;
-      this.touchVec = { x: 0, y: 0 };
+      this.touchVec.x = 0;
+      this.touchVec.y = 0;
       if (this.stickEl) this.stickEl.style.display = 'none';
       if (this.knobEl) this.knobEl.style.transform = '';
     }
@@ -89,8 +100,13 @@ export class Input {
     return this.pressedThisFrame.has(code);
   }
 
-  anyPressed(...codes: string[]): boolean {
-    return codes.some((c) => this.pressedThisFrame.has(c));
+  /**
+   * Was any of these codes pressed this frame? Fixed arity (up to 3) so the per-frame call sites never allocate a rest
+   * array (BUG-QA-008).
+   */
+  anyPressed(a: string, b?: string, c?: string): boolean {
+    const p = this.pressedThisFrame;
+    return p.has(a) || (b !== undefined && p.has(b)) || (c !== undefined && p.has(c));
   }
 
   update(): void {
@@ -115,14 +131,16 @@ export class Input {
       if (gp.buttons[13]?.pressed) z += 1;
       if (gp.buttons[14]?.pressed) x -= 1;
       if (gp.buttons[15]?.pressed) x += 1;
-      gp.buttons.forEach((b, i) => {
-        const was = this.gpPrev[i] ?? false;
-        if (b.pressed && !was) {
-          this.pressedThisFrame.add(`Pad${i}`);
+      // plain loop + precomputed codes: no per-frame closure or template-string allocation (BUG-QA-008)
+      const btns = gp.buttons;
+      for (let i = 0; i < btns.length; i++) {
+        const down = btns[i].pressed;
+        if (down && !(this.gpPrev[i] ?? false)) {
+          this.pressedThisFrame.add(PAD_CODES[i] ?? `Pad${i}`);
           this.usingGamepad = true;
         }
-        this.gpPrev[i] = b.pressed;
-      });
+        this.gpPrev[i] = down;
+      }
       break;
     }
 

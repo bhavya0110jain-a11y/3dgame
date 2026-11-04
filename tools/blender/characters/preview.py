@@ -13,7 +13,7 @@ import addon_utils
 from mathutils import Vector
 
 GAME_SCALE = {'shade': 1, 'crawler': 1, 'wisp': 0.9, 'brute': 1.7, 'stalker': 1.1, 'spitter': 1.1, 'bog': 1.3,
-              'knight': 1.4, 'stag': 3.2, 'mire': 3.4, 'king': 3.0, 'bearer': 1}
+              'knight': 1.4, 'blob': 1.35, 'bloater': 1.05, 'warden': 1.35, 'stag': 3.2, 'mire': 3.4, 'king': 3.0, 'bearer': 1}
 
 
 def main():

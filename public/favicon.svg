@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Last Lantern app icon: moonlit storybook night, a warm lantern against a big moon. Original artwork. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#2b1a78"/>
+      <stop offset="0.55" stop-color="#1b3f86"/>
+      <stop offset="1" stop-color="#0f6e86"/>
+    </linearGradient>
+    <radialGradient id="moon" cx="40%" cy="34%" r="70%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.65" stop-color="#e3e9ff"/>
+      <stop offset="1" stop-color="#a9b6ff"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#b8c4ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#b8c4ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fff1b8"/>
+      <stop offset="0.3" stop-color="#ffbe45" stop-opacity="0.95"/>
+      <stop offset="0.7" stop-color="#ff7a1a" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ff7a1a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff3c2"/>
+      <stop offset="1" stop-color="#ffc64a"/>
+    </linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd970"/>
+      <stop offset="1" stop-color="#e08a1e"/>
+    </linearGradient>
+    <linearGradient id="hill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b2a8f"/>
+      <stop offset="1" stop-color="#1a1150"/>
+    </linearGradient>
+    <clipPath id="sq"><rect x="40" y="40" width="944" height="944" rx="210"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#sq)">
+    <rect x="0" y="0" width="1024" height="1024" fill="url(#sky)"/>
+    <!-- stars -->
+    <g fill="#e9ecff">
+      <circle cx="180" cy="210" r="9"/><circle cx="830" cy="170" r="7"/><circle cx="880" cy="420" r="6"/>
+      <circle cx="140" cy="470" r="6"/><circle cx="300" cy="120" r="5"/><circle cx="760" cy="300" r="5"/>
+    </g>
+    <!-- moon -->
+    <circle cx="512" cy="400" r="330" fill="url(#halo)"/>
+    <circle cx="512" cy="400" r="245" fill="url(#moon)" stroke="#1a1040" stroke-width="22"/>
+    <circle cx="430" cy="330" r="34" fill="#bcc6ff" opacity="0.6"/>
+    <circle cx="610" cy="470" r="48" fill="#bcc6ff" opacity="0.5"/>
+    <circle cx="600" cy="300" r="20" fill="#bcc6ff" opacity="0.6"/>
+    <!-- rolling hill -->
+    <path d="M0 820 C 200 720, 380 760, 512 790 C 660 822, 820 740, 1024 770 L1024 1024 L0 1024 Z" fill="url(#hill)"/>
+    <!-- lantern glow -->
+    <circle cx="512" cy="640" r="300" fill="url(#glow)"/>
+  </g>
+
+  <!-- hanging lantern -->
+  <g stroke="#1a1040" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M512 150 V 400" stroke-width="26" fill="none"/>
+    <path d="M462 418 a50 50 0 0 1 100 0" stroke-width="26" fill="none"/>
+    <path d="M432 446 h160 l26 58 H406 Z" fill="url(#brass)" stroke-width="22"/>
+    <path d="M432 504 h160 l26 46 v130 l-26 36 H432 l-26 -36 V550 Z" fill="url(#glass)" stroke-width="22"/>
+    <path d="M512 560 c30 40 46 66 46 96 a46 46 0 0 1 -92 0 c0 -30 16 -56 46 -96 z" fill="#ff8a1f" stroke="none"/>
+    <path d="M512 606 c12 18 18 30 18 42 a18 18 0 0 1 -36 0 c0 -12 6 -24 18 -42 z" fill="#fff7dc" stroke="none"/>
+    <path d="M396 724 h232 l-26 48 H422 Z" fill="url(#brass)" stroke-width="22"/>
+  </g>
+  <!-- glass highlight -->
+  <path d="M440 530 v120" stroke="#ffffff" stroke-opacity="0.7" stroke-width="14" stroke-linecap="round"/>
+</svg>
