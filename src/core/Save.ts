@@ -12,6 +12,8 @@ export interface SaveData {
   selectedCharacter: string;
   achievements: string[];
   biomesCleared: string[];
+  /** Lifetime counters for achievements (src/game/Achievements.ts). Optional for old saves. */
+  lifetime?: Record<string, number>;
   settings: {
     masterVolume: number;
     musicVolume: number;

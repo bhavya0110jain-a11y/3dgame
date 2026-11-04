@@ -30,6 +30,12 @@ const port = server.address().port;
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+// SwiftShader frames can take seconds on a loaded machine; screenshots wait for a frame, so be generous.
+page.setDefaultTimeout(180_000);
+/** Waits for 3 rendered frames + a beat so CSS screen-in animations have actually played (SwiftShader can be ~1 fps). */
+const settle = (p = page, ms = 500) =>
+  p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => r())))))
+    .then(() => p.waitForTimeout(ms));
 const errors = [];
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push(String(e)));
@@ -40,23 +46,41 @@ await page.screenshot({ path: join(outDir, 'smoke-01-menu.png') });
 
 await page.click('[data-act=play]');
 await page.waitForTimeout(500);
+await settle();
 await page.screenshot({ path: join(outDir, 'smoke-02-setup.png') });
 await page.click('[data-act=start]');
 await page.waitForTimeout(1000);
 
 // Hold movement and fast-forward the simulation; auto-pick level-ups.
+// Fast-forward = fixed 1/30 s steps through Game.updateRun (the same call the real loop makes while playing), so the
+// amount of game time covered does not depend on how slow SwiftShader frames are on a loaded machine.
 await page.keyboard.down('KeyD');
+let levelShot = false;
 for (let i = 0; i < 14; i++) {
-  await page.evaluate(() => { const g = window.__game; g.debug.timeScale = 3; });
+  await page.evaluate(() => {
+    const g = window.__game;
+    for (let k = 0; k < 45 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+  });
   await page.waitForTimeout(700);
   const state = await page.evaluate(() => window.__game.state);
   if (state === 'levelup') {
-    if (i === 3) await page.screenshot({ path: join(outDir, 'smoke-04-levelup.png') });
+    if (!levelShot && (await page.evaluate(() => window.__game.levelMode)) === 'levelup') {
+      await settle();
+      await page.screenshot({ path: join(outDir, 'smoke-04-levelup.png') });
+      levelShot = true;
+    }
     await page.keyboard.press('Digit1');
+    await page.waitForTimeout(400);
+    // reliquary / extra level-ups: keep the run moving
+    await page.evaluate(() => {
+      const g = window.__game;
+      for (let n = 0; n < 8 && g.state === 'levelup'; n++) (g.levelMode === 'chest' ? g.closeChest() : g.chooseUpgrade(0));
+    });
   }
   if (i === 6) { await page.keyboard.up('KeyD'); await page.keyboard.down('KeyW'); }
   if (state === 'gameover') break;
 }
+await page.keyboard.up('KeyW');
 await page.evaluate(() => { window.__game.debug.timeScale = 1; });
 await page.waitForTimeout(400);
 await page.screenshot({ path: join(outDir, 'smoke-03-gameplay.png') });
@@ -98,12 +122,47 @@ console.log('summary', JSON.stringify(summary));
 // Force a game over to capture that screen.
 await page.evaluate(() => window.__game.endRun(false));
 await page.waitForTimeout(600);
+await settle();
 await page.screenshot({ path: join(outDir, 'smoke-05-gameover.png') });
+
+// Touch + portrait phone: taps must reach menu buttons (regression for BUG-QA-004) and the HUD must fit portrait.
+// Set SMOKE_TOUCH=0 to skip (adds ~20 s under SwiftShader).
+const failures = [];
+if (process.env.SMOKE_TOUCH !== '0') {
+  await page.close(); // free the main page's render loop before booting a second game instance
+  const tctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
+  const tpage = await tctx.newPage();
+  tpage.setDefaultTimeout(180_000);
+  tpage.on('pageerror', (e) => errors.push('[touch] ' + String(e)));
+  await tpage.goto(`http://localhost:${port}/`);
+  await tpage.waitForFunction(() => !!window.__game, null, { timeout: 180_000 });
+  await tpage.waitForSelector('.screen-menu.visible [data-act=play]', { state: 'visible' });
+  await settle(tpage);
+  await tpage.tap('[data-act=play]');
+  await tpage.waitForTimeout(600);
+  const setupVisible = await tpage.evaluate(() => !!document.querySelector('.screen-setup.visible'));
+  if (!setupVisible) failures.push('touch: tapping Play did not open the setup screen');
+  if (setupVisible) {
+    await tpage.tap('[data-act=start]');
+    await tpage.waitForTimeout(800);
+  }
+  if ((await tpage.evaluate(() => window.__game.state)) !== 'playing') {
+    failures.push('touch: tapping Start did not start a run');
+    await tpage.evaluate(() => window.__game.startRun());
+  }
+  await tpage.evaluate(() => { window.__game.debug.timeScale = 3; });
+  await tpage.waitForTimeout(1500);
+  await tpage.evaluate(() => { window.__game.debug.timeScale = 1; });
+  await settle(tpage);
+  await tpage.screenshot({ path: join(outDir, 'smoke-08-portrait.png') });
+  await tctx.close();
+}
 
 await browser.close();
 server.close();
-if (errors.length) {
-  console.error('CONSOLE ERRORS:\n' + errors.join('\n'));
+if (errors.length || failures.length) {
+  if (errors.length) console.error('CONSOLE ERRORS:\n' + errors.join('\n'));
+  if (failures.length) console.error('SMOKE FAILURES:\n' + failures.join('\n'));
   process.exit(1);
 }
 console.log('smoke OK ->', outDir);

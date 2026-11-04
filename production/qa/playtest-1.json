@@ -1,0 +1,635 @@
+{
+  "run": 1,
+  "biome": "biome_pines",
+  "meta": "none",
+  "build": "/tmp/claude-0/-home-user-3dgame/eae0ed48-5b7a-5ab2-8a20-e8c9671eef35/scratchpad/build-qa",
+  "date": "2026-11-04T07:06:18.683Z",
+  "consoleErrors": [],
+  "outcome": {
+    "reason": "death",
+    "state": "gameover",
+    "victory": false,
+    "died": true,
+    "bossKilled": false,
+    "elapsed": 359.4,
+    "level": 20,
+    "kills": 1450,
+    "peakEnemies": 211,
+    "dmgTaken": 295,
+    "hits": 25,
+    "lowestLight": 0,
+    "lowestLightAt": 359,
+    "worst30s": {
+      "t": 330,
+      "dmg": 93
+    },
+    "evolutions": [],
+    "chests": 0,
+    "elites": 1,
+    "ashEarned": 31,
+    "weapons": [
+      "ember_bolt:5",
+      "frost_shards:3",
+      "spark_chain:3",
+      "flare_nova:3",
+      "brazier:1"
+    ],
+    "relics": [
+      "bellows:2",
+      "oil:2",
+      "clockwork:1"
+    ],
+    "damageTakenBy": [
+      {
+        "src": "stalker",
+        "hits": 4,
+        "dmg": 61,
+        "first": 275
+      },
+      {
+        "src": "wisp",
+        "hits": 8,
+        "dmg": 59,
+        "first": 44
+      },
+      {
+        "src": "brute",
+        "hits": 2,
+        "dmg": 42,
+        "first": 328
+      },
+      {
+        "src": "gloam_jelly",
+        "hits": 3,
+        "dmg": 35,
+        "first": 320
+      },
+      {
+        "src": "crawler",
+        "hits": 3,
+        "dmg": 27,
+        "first": 333
+      },
+      {
+        "src": "ranged/hazard",
+        "hits": 1,
+        "dmg": 24,
+        "first": 346
+      },
+      {
+        "src": "brute*",
+        "hits": 1,
+        "dmg": 23,
+        "first": 359
+      },
+      {
+        "src": "cinder_tick",
+        "hits": 1,
+        "dmg": 8,
+        "first": 315
+      },
+      {
+        "src": "shade",
+        "hits": 1,
+        "dmg": 7,
+        "first": 153
+      },
+      {
+        "src": "jellyling",
+        "hits": 1,
+        "dmg": 5,
+        "first": 220
+      }
+    ],
+    "damageBySource": [
+      {
+        "source": "ember_bolt",
+        "share": 0.381
+      },
+      {
+        "source": "blast",
+        "share": 0.221
+      },
+      {
+        "source": "spark_chain",
+        "share": 0.204
+      },
+      {
+        "source": "frost_shards",
+        "share": 0.085
+      },
+      {
+        "source": "flare_nova",
+        "share": 0.076
+      },
+      {
+        "source": "brazier",
+        "share": 0.033
+      }
+    ],
+    "frames": 2949,
+    "renders": 84,
+    "wallS": 389
+  },
+  "samples": [
+    {
+      "t": 30,
+      "level": 4,
+      "kills": 48,
+      "killsPerSec": 1.6,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 18,
+      "dmgTaken": 0,
+      "dps": 13,
+      "hpMul": 1.08,
+      "weapons": [
+        "ember_bolt:2",
+        "frost_shards:1",
+        "spark_chain:1"
+      ],
+      "relics": [],
+      "wallS": 46
+    },
+    {
+      "t": 60,
+      "level": 6,
+      "kills": 139,
+      "killsPerSec": 3,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 17,
+      "dmgTaken": 4,
+      "dps": 24,
+      "hpMul": 1.17,
+      "weapons": [
+        "ember_bolt:3",
+        "frost_shards:1",
+        "spark_chain:1",
+        "flare_nova:1"
+      ],
+      "relics": [],
+      "wallS": 86
+    },
+    {
+      "t": 90,
+      "level": 9,
+      "kills": 232,
+      "killsPerSec": 3.1,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 21,
+      "dmgTaken": 0,
+      "dps": 27,
+      "hpMul": 1.26,
+      "weapons": [
+        "ember_bolt:4",
+        "frost_shards:1",
+        "spark_chain:1",
+        "flare_nova:2"
+      ],
+      "relics": [
+        "bellows:1"
+      ],
+      "wallS": 122
+    },
+    {
+      "t": 120,
+      "level": 10,
+      "kills": 333,
+      "killsPerSec": 3.4,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 16,
+      "dmgTaken": 0,
+      "dps": 44,
+      "hpMul": 1.36,
+      "weapons": [
+        "ember_bolt:4",
+        "frost_shards:1",
+        "spark_chain:1",
+        "flare_nova:2"
+      ],
+      "relics": [
+        "bellows:1",
+        "oil:1"
+      ],
+      "wallS": 165
+    },
+    {
+      "t": 150,
+      "level": 11,
+      "kills": 437,
+      "killsPerSec": 3.5,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 62,
+      "dmgTaken": 0,
+      "dps": 48,
+      "hpMul": 1.46,
+      "weapons": [
+        "ember_bolt:4",
+        "frost_shards:1",
+        "spark_chain:1",
+        "flare_nova:3"
+      ],
+      "relics": [
+        "bellows:1",
+        "oil:1"
+      ],
+      "wallS": 178
+    },
+    {
+      "t": 180,
+      "level": 14,
+      "kills": 584,
+      "killsPerSec": 4.9,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 30,
+      "dmgTaken": 7,
+      "dps": 62,
+      "hpMul": 1.56,
+      "weapons": [
+        "ember_bolt:4",
+        "frost_shards:2",
+        "spark_chain:3",
+        "flare_nova:3"
+      ],
+      "relics": [
+        "bellows:1",
+        "oil:1"
+      ],
+      "wallS": 215
+    },
+    {
+      "t": 210,
+      "level": 15,
+      "kills": 696,
+      "killsPerSec": 3.7,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 32,
+      "dmgTaken": 0,
+      "dps": 86,
+      "hpMul": 1.67,
+      "weapons": [
+        "ember_bolt:4",
+        "frost_shards:2",
+        "spark_chain:3",
+        "flare_nova:3"
+      ],
+      "relics": [
+        "bellows:1",
+        "oil:2"
+      ],
+      "wallS": 242
+    },
+    {
+      "t": 240,
+      "level": 15,
+      "kills": 803,
+      "killsPerSec": 3.6,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 69,
+      "dmgTaken": 5,
+      "dps": 101,
+      "hpMul": 1.78,
+      "weapons": [
+        "ember_bolt:4",
+        "frost_shards:2",
+        "spark_chain:3",
+        "flare_nova:3"
+      ],
+      "relics": [
+        "bellows:1",
+        "oil:2"
+      ],
+      "wallS": 267
+    },
+    {
+      "t": 270,
+      "level": 16,
+      "kills": 897,
+      "killsPerSec": 3.1,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 131,
+      "dmgTaken": 0,
+      "dps": 97,
+      "hpMul": 1.9,
+      "weapons": [
+        "ember_bolt:4",
+        "frost_shards:2",
+        "spark_chain:3",
+        "flare_nova:3"
+      ],
+      "relics": [
+        "bellows:2",
+        "oil:2"
+      ],
+      "wallS": 290
+    },
+    {
+      "t": 300,
+      "level": 16,
+      "kills": 1012,
+      "killsPerSec": 3.8,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 138,
+      "dmgTaken": 15,
+      "dps": 128,
+      "hpMul": 2.03,
+      "weapons": [
+        "ember_bolt:4",
+        "frost_shards:2",
+        "spark_chain:3",
+        "flare_nova:3"
+      ],
+      "relics": [
+        "bellows:2",
+        "oil:2"
+      ],
+      "wallS": 313
+    },
+    {
+      "t": 330,
+      "level": 17,
+      "kills": 1139,
+      "killsPerSec": 4.2,
+      "light": 61,
+      "maxLight": 100,
+      "lightFrac": 0.61,
+      "enemies": 211,
+      "dmgTaken": 93,
+      "dps": 142,
+      "hpMul": 2.15,
+      "weapons": [
+        "ember_bolt:4",
+        "frost_shards:2",
+        "spark_chain:3",
+        "flare_nova:3"
+      ],
+      "relics": [
+        "bellows:2",
+        "oil:2",
+        "clockwork:1"
+      ],
+      "wallS": 347
+    }
+  ],
+  "timeline": [
+    {
+      "t": 75,
+      "type": "elite",
+      "id": "stalker"
+    },
+    {
+      "t": 175,
+      "type": "elite",
+      "id": "brute"
+    },
+    {
+      "t": 275,
+      "type": "elite",
+      "id": "stalker"
+    },
+    {
+      "t": 359.4,
+      "type": "run_ended",
+      "victory": false
+    }
+  ],
+  "picks": [
+    {
+      "t": 8.7,
+      "level": 2,
+      "id": "frost_shards",
+      "kind": "weapon-new",
+      "offered": [
+        "bellows",
+        "frost_shards",
+        "wick"
+      ]
+    },
+    {
+      "t": 16.1,
+      "level": 3,
+      "id": "spark_chain",
+      "kind": "weapon-new",
+      "offered": [
+        "clockwork",
+        "bellows",
+        "spark_chain"
+      ]
+    },
+    {
+      "t": 25,
+      "level": 4,
+      "id": "ember_bolt",
+      "kind": "weapon-up",
+      "offered": [
+        "frost_shards",
+        "ember_bolt",
+        "quill"
+      ]
+    },
+    {
+      "t": 33.1,
+      "level": 5,
+      "id": "flare_nova",
+      "kind": "weapon-new",
+      "offered": [
+        "flare_nova",
+        "twin",
+        "clockwork"
+      ]
+    },
+    {
+      "t": 46.6,
+      "level": 6,
+      "id": "ember_bolt",
+      "kind": "weapon-up",
+      "offered": [
+        "ember_bolt",
+        "twin",
+        "bellows"
+      ]
+    },
+    {
+      "t": 60,
+      "level": 7,
+      "id": "bellows",
+      "kind": "passive",
+      "offered": [
+        "tome",
+        "bellows",
+        "cinder_halo"
+      ]
+    },
+    {
+      "t": 69.5,
+      "level": 8,
+      "id": "flare_nova",
+      "kind": "weapon-up",
+      "offered": [
+        "flare_nova",
+        "oil",
+        "frost_shards"
+      ]
+    },
+    {
+      "t": 86.5,
+      "level": 9,
+      "id": "ember_bolt",
+      "kind": "weapon-up",
+      "offered": [
+        "wick",
+        "ember_bolt",
+        "cinder_halo"
+      ]
+    },
+    {
+      "t": 106.2,
+      "level": 10,
+      "id": "oil",
+      "kind": "passive",
+      "offered": [
+        "lantern_hook",
+        "clover",
+        "oil"
+      ]
+    },
+    {
+      "t": 135.4,
+      "level": 11,
+      "id": "flare_nova",
+      "kind": "weapon-up",
+      "offered": [
+        "flare_nova",
+        "clover",
+        "twin"
+      ]
+    },
+    {
+      "t": 161.2,
+      "level": 12,
+      "id": "frost_shards",
+      "kind": "weapon-up",
+      "offered": [
+        "frost_shards",
+        "cinder_halo",
+        "brazier"
+      ]
+    },
+    {
+      "t": 178.2,
+      "level": 13,
+      "id": "spark_chain",
+      "kind": "weapon-up",
+      "offered": [
+        "spark_chain",
+        "cinder_halo",
+        "lantern_hook"
+      ]
+    },
+    {
+      "t": 178.7,
+      "level": 14,
+      "id": "spark_chain",
+      "kind": "weapon-up",
+      "offered": [
+        "oil",
+        "spark_chain",
+        "lantern_hook"
+      ]
+    },
+    {
+      "t": 193,
+      "level": 15,
+      "id": "oil",
+      "kind": "passive",
+      "offered": [
+        "tome",
+        "oil",
+        "quill"
+      ]
+    },
+    {
+      "t": 246.5,
+      "level": 16,
+      "id": "bellows",
+      "kind": "passive",
+      "offered": [
+        "quill",
+        "cinder_halo",
+        "bellows"
+      ]
+    },
+    {
+      "t": 320.8,
+      "level": 17,
+      "id": "clockwork",
+      "kind": "passive",
+      "offered": [
+        "clockwork",
+        "brazier",
+        "quill"
+      ]
+    },
+    {
+      "t": 345.4,
+      "level": 18,
+      "id": "ember_bolt",
+      "kind": "weapon-up",
+      "offered": [
+        "flint",
+        "wick",
+        "ember_bolt"
+      ]
+    },
+    {
+      "t": 346.1,
+      "level": 19,
+      "id": "brazier",
+      "kind": "weapon-new",
+      "offered": [
+        "brazier",
+        "vesper_bell",
+        "oil"
+      ]
+    },
+    {
+      "t": 347.7,
+      "level": 20,
+      "id": "frost_shards",
+      "kind": "weapon-up",
+      "offered": [
+        "frost_shards",
+        "boots",
+        "flint"
+      ]
+    }
+  ],
+  "error": null,
+  "cfg": {
+    "substeps": 3,
+    "skill": 0.8,
+    "maxTime": 1080,
+    "renderMs": 4000,
+    "endless": false,
+    "seed": 1001
+  }
+}

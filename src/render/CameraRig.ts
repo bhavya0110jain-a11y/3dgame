@@ -1,0 +1,147 @@
+import * as THREE from 'three';
+
+const smooth = (k: number, dt: number) => 1 - Math.exp(-k * dt);
+const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+
+/** Gameplay framing at zoom 1: camera sits BACK m behind (+Z) and HEIGHT m above the focus (~52° pitch). */
+const HEIGHT = 18.5;
+const BACK = 14.5;
+/** Direction the menu hero shot looks (towards the low moon over the -Z horizon, see Sky.moonDir). */
+const HERO_FWD = new THREE.Vector3(-0.3, 0, -1).normalize();
+
+/**
+ * Camera feel (driven from Game.updateCamera):
+ *  - gameplay: critically-damped follow with velocity look-ahead (smoothed separately so direction changes
+ *    don't jerk the frame), zoom that eases out with crowd size / boss presence, boss-aware framing that drifts
+ *    towards the boss, trauma-based shake (amplitude = trauma², smooth multi-sine noise, a touch of roll)
+ *  - menu: low-angle hero shot of the bearer on the left third, silhouetted against the moon, slow sway
+ *  - menu → run: eased 1.1 s swoop from the hero shot down into the gameplay angle
+ * Allocation-free per frame.
+ */
+export class CameraRig {
+  /** Smoothed point the camera looks at (ground level). Also the moon-shadow centre. */
+  readonly focus = new THREE.Vector3();
+  /** Current zoom multiplier (1 = default framing). */
+  zoom = 1;
+  private lead = new THREE.Vector3();
+  private look = new THREE.Vector3();
+  private desiredPos = new THREE.Vector3();
+  private desiredLook = new THREE.Vector3();
+  private fromPos = new THREE.Vector3();
+  private fromLook = new THREE.Vector3();
+  private blend = 1;
+  private mode: 'menu' | 'follow' = 'menu';
+  private shakeT = 0;
+  private menuT = 0;
+
+  constructor(private camera: THREE.PerspectiveCamera) {}
+
+  /** Snap the gameplay camera onto (x, z) without smoothing (e.g. after a teleport). */
+  snap(x: number, z: number): void {
+    this.focus.set(x, 0, z);
+    this.lead.set(0, 0, 0);
+    this.blend = 1;
+  }
+
+  menu(dt: number, x: number, z: number): void {
+    if (this.mode !== 'menu') {
+      this.mode = 'menu';
+      this.menuT = 0;
+    }
+    this.menuT += dt;
+    const t = this.menuT;
+    // gentle sway (±7°) + breathing dolly; never a full orbit, so the moon stays framed behind the bearer
+    const yaw = Math.sin(t * 0.11) * 0.12;
+    const dist = 6.1 + Math.sin(t * 0.17) * 0.25;
+    const cy = Math.cos(yaw);
+    const sy = Math.sin(yaw);
+    const fx = HERO_FWD.x * cy - HERO_FWD.z * sy;
+    const fz = HERO_FWD.x * sy + HERO_FWD.z * cy;
+    const rx = -fz;
+    const rz = fx;
+    const cam = this.camera;
+    cam.position.set(x - fx * dist + rx * 0.5, 1.5 + Math.sin(t * 0.23) * 0.06, z - fz * dist + rz * 0.5);
+    // look past the bearer, offset right → bearer sits on the left third, sky + moon fill the upper frame
+    this.look.set(x + fx * 4 + rx * 3.1, 2.25, z + fz * 4 + rz * 3.1);
+    cam.lookAt(this.look);
+    this.focus.set(x, 0, z);
+    this.zoom = 1;
+  }
+
+  /**
+   * @param crowd  0..1 pressure (enemy count / boss) → zoom out up to ~30%
+   * @param trauma 0..1 shake trauma (Game.shakeAmt)
+   * @param bossX/bossZ boss position, or NaN when none
+   */
+  follow(dt: number, x: number, z: number, vx: number, vz: number, crowd: number, trauma: number, bossX: number, bossZ: number): void {
+    const cam = this.camera;
+    if (this.mode !== 'follow') {
+      this.mode = 'follow';
+      this.fromPos.copy(cam.position);
+      this.fromLook.copy(this.look);
+      this.blend = 0;
+      this.focus.set(x, 0, z);
+      this.lead.set(0, 0, 0);
+    }
+    // look-ahead: ~0.32 s of travel, capped, eased in slowly
+    let lx = vx * 0.32;
+    let lz = vz * 0.32;
+    const ll = Math.hypot(lx, lz);
+    if (ll > 2.4) {
+      lx *= 2.4 / ll;
+      lz *= 2.4 / ll;
+    }
+    const kl = smooth(2.6, dt);
+    this.lead.x += (lx - this.lead.x) * kl;
+    this.lead.z += (lz - this.lead.z) * kl;
+    let tx = x + this.lead.x;
+    let tz = z + this.lead.z;
+    if (Number.isFinite(bossX)) {
+      // keep the boss in the frame: drift up to 4 m towards it
+      let bx = (bossX - x) * 0.3;
+      let bz = (bossZ - z) * 0.3;
+      const bl = Math.hypot(bx, bz);
+      if (bl > 4) {
+        bx *= 4 / bl;
+        bz *= 4 / bl;
+      }
+      tx += bx;
+      tz += bz;
+    }
+    const kf = smooth(7, dt);
+    this.focus.x += (tx - this.focus.x) * kf;
+    this.focus.z += (tz - this.focus.z) * kf;
+    const targetZoom = 1 + clamp(crowd, 0, 1) * 0.3;
+    this.zoom += (targetZoom - this.zoom) * smooth(targetZoom > this.zoom ? 0.9 : 0.5, dt);
+
+    const z0 = this.zoom;
+    this.desiredPos.set(this.focus.x, HEIGHT * z0, this.focus.z + BACK * z0);
+    this.desiredLook.set(this.focus.x, 0, this.focus.z - 0.6);
+
+    // shake: trauma² amplitude, smooth multi-frequency noise (no white-noise jitter)
+    this.shakeT += dt;
+    const a = trauma * trauma;
+    if (a > 1e-4) {
+      const t = this.shakeT;
+      const n1 = Math.sin(t * 37.1) * 0.6 + Math.sin(t * 61.7 + 1.3) * 0.4;
+      const n2 = Math.sin(t * 41.3 + 2.1) * 0.6 + Math.sin(t * 57.9 + 0.4) * 0.4;
+      const n3 = Math.sin(t * 29.3 + 4.2) * 0.7 + Math.sin(t * 71.1) * 0.3;
+      this.desiredPos.x += n1 * a * 0.55;
+      this.desiredPos.y += n2 * a * 0.35;
+      this.desiredLook.x += n1 * a * 0.25;
+      this.desiredLook.z += n3 * a * 0.25;
+    }
+
+    if (this.blend < 1) {
+      this.blend = Math.min(1, this.blend + dt / 1.1);
+      const e = this.blend * this.blend * (3 - 2 * this.blend);
+      cam.position.copy(this.fromPos).lerp(this.desiredPos, e);
+      this.look.copy(this.fromLook).lerp(this.desiredLook, e);
+    } else {
+      cam.position.copy(this.desiredPos);
+      this.look.copy(this.desiredLook);
+    }
+    cam.lookAt(this.look);
+    if (a > 1e-4) cam.rotateZ(Math.sin(this.shakeT * 23.7 + 0.8) * a * 0.03);
+  }
+}

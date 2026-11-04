@@ -41,8 +41,12 @@ export function baseStats(): PlayerStats {
   };
 }
 
-/** XP needed to go from `level` to `level+1`. */
+/**
+ * XP needed to go from `level` to `level+1`. Cheap early levels make the first minute pop (≈4-5 level-ups in 60 s),
+ * then ~7%/level growth to 20 and ~4%/level after so late levels still arrive every ~15-25 s with a strong build.
+ * Tuned with tools/balance-sim.ts (see design/gdd/progression.md).
+ */
 export function xpForLevel(level: number): number {
-  if (level < 20) return Math.round(5 + level * 10 * Math.pow(1.08, level));
-  return Math.round(5 + level * 13 * Math.pow(1.06, level));
+  if (level < 20) return Math.round(2 + 3 * level * Math.pow(1.09, level));
+  return Math.round(4 * level * Math.pow(1.07, 19) * Math.pow(1.04, level - 19));
 }

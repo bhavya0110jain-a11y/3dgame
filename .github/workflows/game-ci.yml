@@ -1,0 +1,108 @@
+# Last Lantern — game CI: typecheck, unit/sim tests, production build; browser smoke test on top.
+# Studio template files under .github/ (CODEOWNERS, issue/PR templates) are unrelated and untouched.
+name: Game CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: game-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  PLAYWRIGHT_VERSION: '1.63.0'
+
+jobs:
+  check:
+    name: Typecheck · Test · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate model manifest
+        run: node tools/gen-model-manifest.mjs
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit + headless sim tests
+        run: npx vitest run
+        env:
+          CI: 'true'
+
+      - name: Build
+        run: npx vite build
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit
+          path: production/qa/junit.xml
+          if-no-files-found: ignore
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 7
+
+  smoke:
+    name: Browser smoke (headless Chromium)
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright (not a project dependency; pinned here)
+        run: |
+          npm install --no-save playwright@${{ env.PLAYWRIGHT_VERSION }}
+          npx playwright install --with-deps chromium
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Smoke test (fails on console errors)
+        run: node tools/smoke.mjs production/qa/evidence
+
+      - name: Perf benchmark (relative, SwiftShader)
+        run: node tools/perf.mjs --counts 100,200,350 --quality high,low --frames 80 --warmup 30 --width 960 --height 540 --out production/qa/ci-perf --baseline production/qa/perf-baseline.json
+        continue-on-error: true
+
+      - name: Upload screenshots & perf
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-evidence
+          path: |
+            production/qa/evidence
+            production/qa/ci-perf
+          if-no-files-found: ignore

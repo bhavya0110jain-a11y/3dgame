@@ -1,0 +1,188 @@
+{
+ "music": {
+  "ambience": [
+   {
+    "file": "amb_night.ogg",
+    "loop": true,
+    "loopEnd": 24.042666666666666,
+    "loopStart": 0.042666666666666665
+   }
+  ],
+  "boss": [
+   {
+    "file": "mus_boss.ogg",
+    "loop": true,
+    "loopEnd": 26.709333333333333,
+    "loopStart": 0.042666666666666665
+   }
+  ],
+  "defeat": [
+   {
+    "file": "stg_defeat.ogg",
+    "loop": false
+   }
+  ],
+  "menu": [
+   {
+    "file": "mus_menu.ogg",
+    "loop": true,
+    "loopEnd": 36.04266666666667,
+    "loopStart": 0.042666666666666665
+   }
+  ],
+  "run": [
+   {
+    "file": "mus_run_0.ogg",
+    "loop": true,
+    "loopEnd": 35.59822916666667,
+    "loopStart": 0.042666666666666665
+   },
+   {
+    "file": "mus_run_1.ogg",
+    "loop": true,
+    "loopEnd": 35.59822916666667,
+    "loopStart": 0.042666666666666665
+   },
+   {
+    "file": "mus_run_2.ogg",
+    "loop": true,
+    "loopEnd": 35.59822916666667,
+    "loopStart": 0.042666666666666665
+   },
+   {
+    "file": "mus_run_3.ogg",
+    "loop": true,
+    "loopEnd": 35.59822916666667,
+    "loopStart": 0.042666666666666665
+   }
+  ],
+  "victory": [
+   {
+    "file": "stg_victory.ogg",
+    "loop": false
+   }
+  ]
+ },
+ "sfx": {
+  "boss_death": [
+   "sfx_boss_death.ogg"
+  ],
+  "boss_roar": [
+   "sfx_boss_roar.ogg"
+  ],
+  "breath": [
+   "sfx_breath.ogg"
+  ],
+  "chest": [
+   "sfx_chest.ogg"
+  ],
+  "crit": [
+   "sfx_crit_0.ogg",
+   "sfx_crit_1.ogg"
+  ],
+  "elite": [
+   "sfx_elite.ogg"
+  ],
+  "evolve": [
+   "sfx_evolve.ogg"
+  ],
+  "explode": [
+   "sfx_explode_0.ogg",
+   "sfx_explode_1.ogg"
+  ],
+  "fire_beam": [
+   "sfx_fire_beam.ogg"
+  ],
+  "fire_bell": [
+   "sfx_fire_bell.ogg"
+  ],
+  "fire_bolt": [
+   "sfx_fire_bolt_0.ogg",
+   "sfx_fire_bolt_1.ogg",
+   "sfx_fire_bolt_2.ogg"
+  ],
+  "fire_brazier": [
+   "sfx_fire_brazier.ogg"
+  ],
+  "fire_frost": [
+   "sfx_fire_frost_0.ogg",
+   "sfx_fire_frost_1.ogg"
+  ],
+  "fire_halo": [
+   "sfx_fire_halo.ogg"
+  ],
+  "fire_hook": [
+   "sfx_fire_hook_0.ogg",
+   "sfx_fire_hook_1.ogg"
+  ],
+  "fire_lance": [
+   "sfx_fire_lance_0.ogg",
+   "sfx_fire_lance_1.ogg"
+  ],
+  "fire_moth": [
+   "sfx_fire_moth_0.ogg",
+   "sfx_fire_moth_1.ogg"
+  ],
+  "fire_nova": [
+   "sfx_fire_nova.ogg"
+  ],
+  "fire_spark": [
+   "sfx_fire_spark_0.ogg",
+   "sfx_fire_spark_1.ogg",
+   "sfx_fire_spark_2.ogg"
+  ],
+  "heal": [
+   "sfx_heal.ogg"
+  ],
+  "heartbeat": [
+   "sfx_heartbeat.ogg"
+  ],
+  "hit": [
+   "sfx_hit_0.ogg",
+   "sfx_hit_1.ogg",
+   "sfx_hit_2.ogg",
+   "sfx_hit_3.ogg"
+  ],
+  "hurt": [
+   "sfx_hurt_0.ogg",
+   "sfx_hurt_1.ogg",
+   "sfx_hurt_2.ogg"
+  ],
+  "kill": [
+   "sfx_kill_0.ogg",
+   "sfx_kill_1.ogg",
+   "sfx_kill_2.ogg",
+   "sfx_kill_3.ogg"
+  ],
+  "kill_elite": [
+   "sfx_kill_elite.ogg"
+  ],
+  "levelup": [
+   "sfx_levelup.ogg"
+  ],
+  "pickup": [
+   "sfx_pickup.ogg"
+  ],
+  "pickup_ash": [
+   "sfx_pickup_ash.ogg"
+  ],
+  "ui_back": [
+   "sfx_ui_back.ogg"
+  ],
+  "ui_click": [
+   "sfx_ui_click.ogg"
+  ],
+  "ui_confirm": [
+   "sfx_ui_confirm.ogg"
+  ],
+  "ui_deny": [
+   "sfx_ui_deny.ogg"
+  ],
+  "ui_hover": [
+   "sfx_ui_hover.ogg"
+  ],
+  "warn": [
+   "sfx_warn.ogg"
+  ]
+ }
+}

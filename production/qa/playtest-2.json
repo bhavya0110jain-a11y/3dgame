@@ -1,0 +1,1578 @@
+{
+  "run": 2,
+  "biome": "biome_pines",
+  "meta": "none",
+  "build": "/tmp/claude-0/-home-user-3dgame/eae0ed48-5b7a-5ab2-8a20-e8c9671eef35/scratchpad/build-qa",
+  "date": "2026-11-04T07:16:39.339Z",
+  "consoleErrors": [],
+  "outcome": {
+    "reason": "death",
+    "state": "gameover",
+    "victory": false,
+    "died": true,
+    "bossKilled": false,
+    "elapsed": 942,
+    "level": 45,
+    "kills": 9190,
+    "peakEnemies": 94,
+    "dmgTaken": 261,
+    "hits": 13,
+    "lowestLight": 0,
+    "lowestLightAt": 942,
+    "worst30s": {
+      "t": 360,
+      "dmg": 77
+    },
+    "evolutions": [
+      "tempest_choir",
+      "sunspear_volley",
+      "moonhook_reaper"
+    ],
+    "chests": 9,
+    "elites": 9,
+    "ashEarned": 251,
+    "weapons": [
+      "sunspear_volley:1",
+      "moonhook_reaper:1",
+      "tempest_choir:1",
+      "brazier:6",
+      "moth_lantern:5"
+    ],
+    "relics": [
+      "lodestone:5",
+      "twin:2",
+      "wick:1",
+      "bellows:3",
+      "clockwork:5",
+      "flint:3"
+    ],
+    "damageTakenBy": [
+      {
+        "src": "boss_hollow_stag",
+        "hits": 2,
+        "dmg": 80,
+        "first": 942
+      },
+      {
+        "src": "brute",
+        "hits": 3,
+        "dmg": 63,
+        "first": 338
+      },
+      {
+        "src": "ranged/hazard",
+        "hits": 1,
+        "dmg": 42,
+        "first": 936
+      },
+      {
+        "src": "crawler",
+        "hits": 4,
+        "dmg": 33,
+        "first": 153
+      },
+      {
+        "src": "wisp",
+        "hits": 3,
+        "dmg": 14,
+        "first": 89
+      }
+    ],
+    "damageBySource": [
+      {
+        "source": "tempest_choir",
+        "share": 0.633
+      },
+      {
+        "source": "ember_bolt",
+        "share": 0.135
+      },
+      {
+        "source": "spark_chain",
+        "share": 0.086
+      },
+      {
+        "source": "lantern_hook",
+        "share": 0.055
+      },
+      {
+        "source": "blast",
+        "share": 0.029
+      },
+      {
+        "source": "sunspear_volley",
+        "share": 0.021
+      },
+      {
+        "source": "brazier",
+        "share": 0.021
+      },
+      {
+        "source": "moonhook_reaper",
+        "share": 0.01
+      }
+    ],
+    "frames": 7957,
+    "renders": 77,
+    "wallS": 321
+  },
+  "samples": [
+    {
+      "t": 30,
+      "level": 4,
+      "kills": 51,
+      "killsPerSec": 1.7,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 15,
+      "dmgTaken": 0,
+      "dps": 14,
+      "hpMul": 1.08,
+      "weapons": [
+        "ember_bolt:1",
+        "lantern_hook:1",
+        "spark_chain:1",
+        "brazier:1"
+      ],
+      "relics": [],
+      "wallS": 41
+    },
+    {
+      "t": 60,
+      "level": 7,
+      "kills": 144,
+      "killsPerSec": 3.1,
+      "light": 100,
+      "maxLight": 100,
+      "lightFrac": 1,
+      "enemies": 13,
+      "dmgTaken": 0,
+      "dps": 24,
+      "hpMul": 1.17,
+      "weapons": [
+        "ember_bolt:1",
+        "lantern_hook:1",
+        "spark_chain:1",
+        "brazier:2"
+      ],
+      "relics": [
+        "lodestone:1",
+        "twin:1"
+      ],
+      "wallS": 52
+    },
+    {
+      "t": 90,
+      "level": 9,
+      "kills": 233,
+      "killsPerSec": 3,
+      "light": 116,
+      "maxLight": 120,
+      "lightFrac": 0.97,
+      "enemies": 21,
+      "dmgTaken": 4,
+      "dps": 33,
+      "hpMul": 1.26,
+      "weapons": [
+        "ember_bolt:1",
+        "lantern_hook:2",
+        "spark_chain:1",
+        "brazier:2"
+      ],
+      "relics": [
+        "lodestone:1",
+        "twin:1",
+        "wick:1"
+      ],
+      "wallS": 63
+    },
+    {
+      "t": 120,
+      "level": 11,
+      "kills": 332,
+      "killsPerSec": 3.3,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 17,
+      "dmgTaken": 0,
+      "dps": 40,
+      "hpMul": 1.36,
+      "weapons": [
+        "ember_bolt:1",
+        "lantern_hook:2",
+        "spark_chain:3",
+        "brazier:2"
+      ],
+      "relics": [
+        "lodestone:2",
+        "twin:1",
+        "wick:1",
+        "bellows:1"
+      ],
+      "wallS": 76
+    },
+    {
+      "t": 150,
+      "level": 13,
+      "kills": 443,
+      "killsPerSec": 3.7,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 56,
+      "dmgTaken": 0,
+      "dps": 53,
+      "hpMul": 1.46,
+      "weapons": [
+        "ember_bolt:1",
+        "lantern_hook:3",
+        "spark_chain:3",
+        "brazier:2"
+      ],
+      "relics": [
+        "lodestone:3",
+        "twin:1",
+        "wick:1",
+        "bellows:1"
+      ],
+      "wallS": 86
+    },
+    {
+      "t": 180,
+      "level": 14,
+      "kills": 591,
+      "killsPerSec": 4.9,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 23,
+      "dmgTaken": 16,
+      "dps": 85,
+      "hpMul": 1.56,
+      "weapons": [
+        "ember_bolt:1",
+        "lantern_hook:3",
+        "spark_chain:4",
+        "brazier:2"
+      ],
+      "relics": [
+        "lodestone:3",
+        "twin:1",
+        "wick:1",
+        "bellows:1"
+      ],
+      "wallS": 97
+    },
+    {
+      "t": 210,
+      "level": 16,
+      "kills": 713,
+      "killsPerSec": 4.1,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 15,
+      "dmgTaken": 13,
+      "dps": 103,
+      "hpMul": 1.67,
+      "weapons": [
+        "ember_bolt:2",
+        "lantern_hook:4",
+        "spark_chain:5",
+        "brazier:2"
+      ],
+      "relics": [
+        "lodestone:3",
+        "twin:1",
+        "wick:1",
+        "bellows:1",
+        "clockwork:1"
+      ],
+      "wallS": 108
+    },
+    {
+      "t": 240,
+      "level": 17,
+      "kills": 869,
+      "killsPerSec": 5.2,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 27,
+      "dmgTaken": 0,
+      "dps": 128,
+      "hpMul": 1.78,
+      "weapons": [
+        "ember_bolt:2",
+        "lantern_hook:4",
+        "spark_chain:5",
+        "brazier:2"
+      ],
+      "relics": [
+        "lodestone:3",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:1"
+      ],
+      "wallS": 114
+    },
+    {
+      "t": 270,
+      "level": 19,
+      "kills": 1082,
+      "killsPerSec": 7.1,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 24,
+      "dmgTaken": 0,
+      "dps": 187,
+      "hpMul": 1.9,
+      "weapons": [
+        "ember_bolt:2",
+        "lantern_hook:4",
+        "spark_chain:6",
+        "brazier:2"
+      ],
+      "relics": [
+        "lodestone:3",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:2"
+      ],
+      "wallS": 123
+    },
+    {
+      "t": 300,
+      "level": 20,
+      "kills": 1263,
+      "killsPerSec": 6,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 30,
+      "dmgTaken": 0,
+      "dps": 203,
+      "hpMul": 2.03,
+      "weapons": [
+        "ember_bolt:2",
+        "lantern_hook:5",
+        "spark_chain:6",
+        "brazier:2"
+      ],
+      "relics": [
+        "lodestone:3",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:2"
+      ],
+      "wallS": 132
+    },
+    {
+      "t": 330,
+      "level": 21,
+      "kills": 1484,
+      "killsPerSec": 7.4,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 64,
+      "dmgTaken": 0,
+      "dps": 278,
+      "hpMul": 2.15,
+      "weapons": [
+        "ember_bolt:2",
+        "lantern_hook:5",
+        "spark_chain:6",
+        "brazier:3"
+      ],
+      "relics": [
+        "lodestone:4",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:3"
+      ],
+      "wallS": 143
+    },
+    {
+      "t": 360,
+      "level": 23,
+      "kills": 1831,
+      "killsPerSec": 11.6,
+      "light": 91,
+      "maxLight": 120,
+      "lightFrac": 0.76,
+      "enemies": 27,
+      "dmgTaken": 77,
+      "dps": 449,
+      "hpMul": 2.28,
+      "weapons": [
+        "ember_bolt:2",
+        "lantern_hook:5",
+        "spark_chain:6",
+        "brazier:4"
+      ],
+      "relics": [
+        "lodestone:4",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:4"
+      ],
+      "wallS": 155
+    },
+    {
+      "t": 390,
+      "level": 25,
+      "kills": 2046,
+      "killsPerSec": 7.2,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 25,
+      "dmgTaken": 0,
+      "dps": 320,
+      "hpMul": 2.42,
+      "weapons": [
+        "ember_bolt:2",
+        "lantern_hook:5",
+        "spark_chain:8",
+        "brazier:4"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:4"
+      ],
+      "wallS": 166
+    },
+    {
+      "t": 420,
+      "level": 26,
+      "kills": 2252,
+      "killsPerSec": 6.9,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 23,
+      "dmgTaken": 0,
+      "dps": 391,
+      "hpMul": 2.56,
+      "weapons": [
+        "ember_bolt:2",
+        "lantern_hook:5",
+        "spark_chain:8",
+        "brazier:4"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:4",
+        "flint:1"
+      ],
+      "wallS": 173
+    },
+    {
+      "t": 450,
+      "level": 27,
+      "kills": 2601,
+      "killsPerSec": 11.6,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 34,
+      "dmgTaken": 0,
+      "dps": 624,
+      "hpMul": 2.71,
+      "weapons": [
+        "ember_bolt:3",
+        "lantern_hook:5",
+        "spark_chain:8",
+        "brazier:4"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:4",
+        "flint:1"
+      ],
+      "wallS": 181
+    },
+    {
+      "t": 480,
+      "level": 29,
+      "kills": 2983,
+      "killsPerSec": 12.7,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 43,
+      "dmgTaken": 0,
+      "dps": 652,
+      "hpMul": 2.86,
+      "weapons": [
+        "ember_bolt:3",
+        "lantern_hook:6",
+        "spark_chain:8",
+        "brazier:4"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:5",
+        "flint:1"
+      ],
+      "wallS": 190
+    },
+    {
+      "t": 510,
+      "level": 30,
+      "kills": 3331,
+      "killsPerSec": 11.6,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 82,
+      "dmgTaken": 0,
+      "dps": 662,
+      "hpMul": 3.01,
+      "weapons": [
+        "ember_bolt:3",
+        "lantern_hook:7",
+        "tempest_choir:1",
+        "brazier:4"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:5",
+        "flint:1"
+      ],
+      "wallS": 199
+    },
+    {
+      "t": 540,
+      "level": 31,
+      "kills": 3731,
+      "killsPerSec": 13.3,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 45,
+      "dmgTaken": 0,
+      "dps": 715,
+      "hpMul": 3.17,
+      "weapons": [
+        "ember_bolt:3",
+        "lantern_hook:7",
+        "tempest_choir:1",
+        "brazier:5"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:5",
+        "flint:1"
+      ],
+      "wallS": 207
+    },
+    {
+      "t": 570,
+      "level": 32,
+      "kills": 4078,
+      "killsPerSec": 11.6,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 40,
+      "dmgTaken": 0,
+      "dps": 816,
+      "hpMul": 3.33,
+      "weapons": [
+        "ember_bolt:4",
+        "lantern_hook:7",
+        "tempest_choir:1",
+        "brazier:5"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:5",
+        "flint:1"
+      ],
+      "wallS": 218
+    },
+    {
+      "t": 600,
+      "level": 33,
+      "kills": 4384,
+      "killsPerSec": 10.2,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 35,
+      "dmgTaken": 0,
+      "dps": 1010,
+      "hpMul": 3.5,
+      "weapons": [
+        "ember_bolt:6",
+        "lantern_hook:7",
+        "tempest_choir:1",
+        "brazier:5"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:5",
+        "flint:1"
+      ],
+      "wallS": 224
+    },
+    {
+      "t": 630,
+      "level": 35,
+      "kills": 4693,
+      "killsPerSec": 10.3,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 26,
+      "dmgTaken": 0,
+      "dps": 948,
+      "hpMul": 3.67,
+      "weapons": [
+        "ember_bolt:6",
+        "lantern_hook:8",
+        "tempest_choir:1",
+        "brazier:6"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:1",
+        "wick:1",
+        "bellows:2",
+        "clockwork:5",
+        "flint:1"
+      ],
+      "wallS": 237
+    },
+    {
+      "t": 660,
+      "level": 36,
+      "kills": 4998,
+      "killsPerSec": 10.2,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 21,
+      "dmgTaken": 0,
+      "dps": 1072,
+      "hpMul": 3.85,
+      "weapons": [
+        "ember_bolt:6",
+        "lantern_hook:8",
+        "tempest_choir:1",
+        "brazier:6"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:2",
+        "wick:1",
+        "bellows:2",
+        "clockwork:5",
+        "flint:1"
+      ],
+      "wallS": 244
+    },
+    {
+      "t": 690,
+      "level": 37,
+      "kills": 5480,
+      "killsPerSec": 16.1,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 93,
+      "dmgTaken": 0,
+      "dps": 1669,
+      "hpMul": 4.03,
+      "weapons": [
+        "ember_bolt:7",
+        "lantern_hook:8",
+        "tempest_choir:1",
+        "brazier:6"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:2",
+        "wick:1",
+        "bellows:2",
+        "clockwork:5",
+        "flint:1"
+      ],
+      "wallS": 252
+    },
+    {
+      "t": 720,
+      "level": 37,
+      "kills": 6109,
+      "killsPerSec": 21,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 34,
+      "dmgTaken": 0,
+      "dps": 1802,
+      "hpMul": 4.22,
+      "weapons": [
+        "ember_bolt:7",
+        "lantern_hook:8",
+        "tempest_choir:1",
+        "brazier:6"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:2",
+        "wick:1",
+        "bellows:2",
+        "clockwork:5",
+        "flint:1"
+      ],
+      "wallS": 265
+    },
+    {
+      "t": 750,
+      "level": 37,
+      "kills": 6658,
+      "killsPerSec": 18.3,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 40,
+      "dmgTaken": 0,
+      "dps": 1749,
+      "hpMul": 4.41,
+      "weapons": [
+        "ember_bolt:7",
+        "lantern_hook:8",
+        "tempest_choir:1",
+        "brazier:6"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:2",
+        "wick:1",
+        "bellows:2",
+        "clockwork:5",
+        "flint:1"
+      ],
+      "wallS": 270
+    },
+    {
+      "t": 780,
+      "level": 37,
+      "kills": 7183,
+      "killsPerSec": 17.5,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 41,
+      "dmgTaken": 0,
+      "dps": 1854,
+      "hpMul": 4.6,
+      "weapons": [
+        "ember_bolt:7",
+        "lantern_hook:8",
+        "tempest_choir:1",
+        "brazier:6"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:2",
+        "wick:1",
+        "bellows:2",
+        "clockwork:5",
+        "flint:1"
+      ],
+      "wallS": 275
+    },
+    {
+      "t": 810,
+      "level": 41,
+      "kills": 7640,
+      "killsPerSec": 15.2,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 35,
+      "dmgTaken": 0,
+      "dps": 2111,
+      "hpMul": 4.8,
+      "weapons": [
+        "ember_bolt:8",
+        "lantern_hook:8",
+        "tempest_choir:1",
+        "brazier:6",
+        "moth_lantern:1"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:2",
+        "wick:1",
+        "bellows:3",
+        "clockwork:5",
+        "flint:2"
+      ],
+      "wallS": 283
+    },
+    {
+      "t": 840,
+      "level": 41,
+      "kills": 8059,
+      "killsPerSec": 14,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 35,
+      "dmgTaken": 0,
+      "dps": 2077,
+      "hpMul": 5,
+      "weapons": [
+        "ember_bolt:8",
+        "lantern_hook:8",
+        "tempest_choir:1",
+        "brazier:6",
+        "moth_lantern:1"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:2",
+        "wick:1",
+        "bellows:3",
+        "clockwork:5",
+        "flint:2"
+      ],
+      "wallS": 289
+    },
+    {
+      "t": 870,
+      "level": 41,
+      "kills": 8486,
+      "killsPerSec": 14.2,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 72,
+      "dmgTaken": 0,
+      "dps": 2012,
+      "hpMul": 5.21,
+      "weapons": [
+        "ember_bolt:8",
+        "lantern_hook:8",
+        "tempest_choir:1",
+        "brazier:6",
+        "moth_lantern:1"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:2",
+        "wick:1",
+        "bellows:3",
+        "clockwork:5",
+        "flint:2"
+      ],
+      "wallS": 294
+    },
+    {
+      "t": 900,
+      "level": 41,
+      "kills": 9097,
+      "killsPerSec": 20.4,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 34,
+      "dmgTaken": 0,
+      "dps": 2810,
+      "hpMul": 5.43,
+      "weapons": [
+        "ember_bolt:8",
+        "lantern_hook:8",
+        "tempest_choir:1",
+        "brazier:6",
+        "moth_lantern:1"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:2",
+        "wick:1",
+        "bellows:3",
+        "clockwork:5",
+        "flint:2"
+      ],
+      "wallS": 301
+    },
+    {
+      "t": 930,
+      "level": 45,
+      "kills": 9174,
+      "killsPerSec": 2.6,
+      "light": 120,
+      "maxLight": 120,
+      "lightFrac": 1,
+      "enemies": 5,
+      "dmgTaken": 0,
+      "dps": 1257,
+      "hpMul": 5.64,
+      "weapons": [
+        "sunspear_volley:1",
+        "moonhook_reaper:1",
+        "tempest_choir:1",
+        "brazier:6",
+        "moth_lantern:5"
+      ],
+      "relics": [
+        "lodestone:5",
+        "twin:2",
+        "wick:1",
+        "bellows:3",
+        "clockwork:5",
+        "flint:3"
+      ],
+      "wallS": 317
+    }
+  ],
+  "timeline": [
+    {
+      "t": 75,
+      "type": "elite",
+      "id": "stalker"
+    },
+    {
+      "t": 104.9,
+      "type": "chest"
+    },
+    {
+      "t": 175,
+      "type": "elite",
+      "id": "brute"
+    },
+    {
+      "t": 208.2,
+      "type": "chest"
+    },
+    {
+      "t": 275,
+      "type": "elite",
+      "id": "brute"
+    },
+    {
+      "t": 306.1,
+      "type": "chest"
+    },
+    {
+      "t": 375,
+      "type": "elite",
+      "id": "stalker"
+    },
+    {
+      "t": 386.7,
+      "type": "chest"
+    },
+    {
+      "t": 475,
+      "type": "elite",
+      "id": "stalker"
+    },
+    {
+      "t": 489.4,
+      "type": "evolved",
+      "from": "spark_chain",
+      "to": "tempest_choir"
+    },
+    {
+      "t": 489.4,
+      "type": "chest"
+    },
+    {
+      "t": 575,
+      "type": "elite",
+      "id": "brute"
+    },
+    {
+      "t": 595,
+      "type": "chest"
+    },
+    {
+      "t": 675,
+      "type": "elite",
+      "id": "stalker"
+    },
+    {
+      "t": 775,
+      "type": "elite",
+      "id": "stalker"
+    },
+    {
+      "t": 875,
+      "type": "elite",
+      "id": "brute"
+    },
+    {
+      "t": 900,
+      "type": "boss_spawned",
+      "defId": "boss_hollow_stag"
+    },
+    {
+      "t": 908.9,
+      "type": "evolved",
+      "from": "ember_bolt",
+      "to": "sunspear_volley"
+    },
+    {
+      "t": 908.9,
+      "type": "chest"
+    },
+    {
+      "t": 909.7,
+      "type": "evolved",
+      "from": "lantern_hook",
+      "to": "moonhook_reaper"
+    },
+    {
+      "t": 909.7,
+      "type": "chest"
+    },
+    {
+      "t": 910.3,
+      "type": "chest"
+    },
+    {
+      "t": 932.1,
+      "type": "boss_enraged",
+      "defId": "boss_hollow_stag"
+    },
+    {
+      "t": 942,
+      "type": "run_ended",
+      "victory": false
+    }
+  ],
+  "picks": [
+    {
+      "t": 9.8,
+      "level": 2,
+      "id": "lantern_hook",
+      "kind": "weapon-new",
+      "offered": [
+        "lantern_hook",
+        "clover",
+        "clockwork"
+      ]
+    },
+    {
+      "t": 20.6,
+      "level": 3,
+      "id": "spark_chain",
+      "kind": "weapon-new",
+      "offered": [
+        "brazier",
+        "spark_chain",
+        "lantern_hook"
+      ]
+    },
+    {
+      "t": 25.5,
+      "level": 4,
+      "id": "brazier",
+      "kind": "weapon-new",
+      "offered": [
+        "wick",
+        "brazier",
+        "tallow"
+      ]
+    },
+    {
+      "t": 32.1,
+      "level": 5,
+      "id": "lodestone",
+      "kind": "passive",
+      "offered": [
+        "boots",
+        "cinder_halo",
+        "lodestone"
+      ]
+    },
+    {
+      "t": 43.5,
+      "level": 6,
+      "id": "twin",
+      "kind": "passive",
+      "offered": [
+        "twin",
+        "wick",
+        "boots"
+      ]
+    },
+    {
+      "t": 54.4,
+      "level": 7,
+      "id": "brazier",
+      "kind": "weapon-up",
+      "offered": [
+        "flint",
+        "brazier",
+        "clover"
+      ]
+    },
+    {
+      "t": 68.7,
+      "level": 8,
+      "id": "lantern_hook",
+      "kind": "weapon-up",
+      "offered": [
+        "lantern_hook",
+        "quill",
+        "boots"
+      ]
+    },
+    {
+      "t": 86.1,
+      "level": 9,
+      "id": "wick",
+      "kind": "passive",
+      "offered": [
+        "frost_shards",
+        "cinder_halo",
+        "wick"
+      ]
+    },
+    {
+      "t": 104.6,
+      "level": 10,
+      "id": "bellows",
+      "kind": "passive",
+      "offered": [
+        "bellows",
+        "boots",
+        "flare_nova"
+      ]
+    },
+    {
+      "t": 115.4,
+      "level": 11,
+      "id": "spark_chain",
+      "kind": "weapon-up",
+      "offered": [
+        "spark_chain",
+        "wick_lance",
+        "quill"
+      ]
+    },
+    {
+      "t": 136.1,
+      "level": 12,
+      "id": "lantern_hook",
+      "kind": "weapon-up",
+      "offered": [
+        "brazier",
+        "wick_lance",
+        "lantern_hook"
+      ]
+    },
+    {
+      "t": 147.7,
+      "level": 13,
+      "id": "lodestone",
+      "kind": "passive",
+      "offered": [
+        "wick",
+        "wick_lance",
+        "lodestone"
+      ]
+    },
+    {
+      "t": 162.5,
+      "level": 14,
+      "id": "spark_chain",
+      "kind": "weapon-up",
+      "offered": [
+        "ember_bolt",
+        "spark_chain",
+        "frost_shards"
+      ]
+    },
+    {
+      "t": 180.5,
+      "level": 15,
+      "id": "ember_bolt",
+      "kind": "weapon-up",
+      "offered": [
+        "cinder_halo",
+        "ember_bolt",
+        "spark_chain"
+      ]
+    },
+    {
+      "t": 207.4,
+      "level": 16,
+      "id": "clockwork",
+      "kind": "passive",
+      "offered": [
+        "bellows",
+        "clockwork",
+        "twin"
+      ]
+    },
+    {
+      "t": 230.6,
+      "level": 17,
+      "id": "bellows",
+      "kind": "passive",
+      "offered": [
+        "quill",
+        "bellows",
+        "tallow"
+      ]
+    },
+    {
+      "t": 248.4,
+      "level": 18,
+      "id": "clockwork",
+      "kind": "passive",
+      "offered": [
+        "clockwork",
+        "clover",
+        "wick"
+      ]
+    },
+    {
+      "t": 267.5,
+      "level": 19,
+      "id": "spark_chain",
+      "kind": "weapon-up",
+      "offered": [
+        "spark_chain",
+        "tome",
+        "vesper_bell"
+      ]
+    },
+    {
+      "t": 296.2,
+      "level": 20,
+      "id": "lantern_hook",
+      "kind": "weapon-up",
+      "offered": [
+        "lantern_hook",
+        "ember_bolt",
+        "wick_lance"
+      ]
+    },
+    {
+      "t": 313.4,
+      "level": 21,
+      "id": "clockwork",
+      "kind": "passive",
+      "offered": [
+        "bellows",
+        "hourglass",
+        "clockwork"
+      ]
+    },
+    {
+      "t": 332.3,
+      "level": 22,
+      "id": "clockwork",
+      "kind": "passive",
+      "offered": [
+        "wick",
+        "bellows",
+        "clockwork"
+      ]
+    },
+    {
+      "t": 342.6,
+      "level": 23,
+      "id": "brazier",
+      "kind": "weapon-up",
+      "offered": [
+        "spark_chain",
+        "cinder_halo",
+        "brazier"
+      ]
+    },
+    {
+      "t": 363,
+      "level": 24,
+      "id": "lodestone",
+      "kind": "passive",
+      "offered": [
+        "twin",
+        "lodestone",
+        "flare_nova"
+      ]
+    },
+    {
+      "t": 387.9,
+      "level": 25,
+      "id": "spark_chain",
+      "kind": "weapon-up",
+      "offered": [
+        "spark_chain",
+        "hourglass",
+        "bellows"
+      ]
+    },
+    {
+      "t": 412.4,
+      "level": 26,
+      "id": "flint",
+      "kind": "passive",
+      "offered": [
+        "twin",
+        "flint",
+        "wick_lance"
+      ]
+    },
+    {
+      "t": 434.8,
+      "level": 27,
+      "id": "ember_bolt",
+      "kind": "weapon-up",
+      "offered": [
+        "ember_bolt",
+        "flint",
+        "bellows"
+      ]
+    },
+    {
+      "t": 455.5,
+      "level": 28,
+      "id": "lantern_hook",
+      "kind": "weapon-up",
+      "offered": [
+        "lantern_hook",
+        "wick",
+        "flare_nova"
+      ]
+    },
+    {
+      "t": 475.1,
+      "level": 29,
+      "id": "clockwork",
+      "kind": "passive",
+      "offered": [
+        "wick",
+        "frost_shards",
+        "clockwork"
+      ]
+    },
+    {
+      "t": 497.7,
+      "level": 30,
+      "id": "lantern_hook",
+      "kind": "weapon-up",
+      "offered": [
+        "twin",
+        "lantern_hook",
+        "gloam_beam"
+      ]
+    },
+    {
+      "t": 527.7,
+      "level": 31,
+      "id": "brazier",
+      "kind": "weapon-up",
+      "offered": [
+        "brazier",
+        "wick_lance",
+        "frost_shards"
+      ]
+    },
+    {
+      "t": 556,
+      "level": 32,
+      "id": "ember_bolt",
+      "kind": "weapon-up",
+      "offered": [
+        "vesper_bell",
+        "gloam_beam",
+        "ember_bolt"
+      ]
+    },
+    {
+      "t": 578.1,
+      "level": 33,
+      "id": "ember_bolt",
+      "kind": "weapon-up",
+      "offered": [
+        "brazier",
+        "ember_bolt",
+        "vesper_bell"
+      ]
+    },
+    {
+      "t": 600.1,
+      "level": 34,
+      "id": "lantern_hook",
+      "kind": "weapon-up",
+      "offered": [
+        "brazier",
+        "lantern_hook",
+        "frost_shards"
+      ]
+    },
+    {
+      "t": 628.3,
+      "level": 35,
+      "id": "brazier",
+      "kind": "weapon-up",
+      "offered": [
+        "wick",
+        "cinder_halo",
+        "brazier"
+      ]
+    },
+    {
+      "t": 658.2,
+      "level": 36,
+      "id": "twin",
+      "kind": "passive",
+      "offered": [
+        "moth_lantern",
+        "frost_shards",
+        "twin"
+      ]
+    },
+    {
+      "t": 681.2,
+      "level": 37,
+      "id": "ember_bolt",
+      "kind": "weapon-up",
+      "offered": [
+        "ember_bolt",
+        "bellows",
+        "wick"
+      ]
+    },
+    {
+      "t": 785.2,
+      "level": 38,
+      "id": "ember_bolt",
+      "kind": "weapon-up",
+      "offered": [
+        "brazier",
+        "ember_bolt",
+        "vesper_bell"
+      ]
+    },
+    {
+      "t": 785.3,
+      "level": 39,
+      "id": "bellows",
+      "kind": "passive",
+      "offered": [
+        "wick",
+        "bellows",
+        "gloam_beam"
+      ]
+    },
+    {
+      "t": 785.4,
+      "level": 40,
+      "id": "moth_lantern",
+      "kind": "weapon-new",
+      "offered": [
+        "vesper_bell",
+        "moth_lantern",
+        "frost_shards"
+      ]
+    },
+    {
+      "t": 785.5,
+      "level": 41,
+      "id": "flint",
+      "kind": "passive",
+      "offered": [
+        "flint",
+        "flare_nova",
+        "vesper_bell"
+      ]
+    },
+    {
+      "t": 907.7,
+      "level": 42,
+      "id": "moth_lantern",
+      "kind": "weapon-up",
+      "offered": [
+        "moth_lantern",
+        "cinder_halo",
+        "bellows"
+      ]
+    },
+    {
+      "t": 911.7,
+      "level": 43,
+      "id": "moth_lantern",
+      "kind": "weapon-up",
+      "offered": [
+        "wick",
+        "gloam_beam",
+        "moth_lantern"
+      ]
+    },
+    {
+      "t": 912.9,
+      "level": 44,
+      "id": "moth_lantern",
+      "kind": "weapon-up",
+      "offered": [
+        "vesper_bell",
+        "moth_lantern",
+        "bellows"
+      ]
+    },
+    {
+      "t": 913.3,
+      "level": 45,
+      "id": "moth_lantern",
+      "kind": "weapon-up",
+      "offered": [
+        "vesper_bell",
+        "frost_shards",
+        "moth_lantern"
+      ]
+    }
+  ],
+  "error": null,
+  "cfg": {
+    "substeps": 3,
+    "skill": 0.8,
+    "maxTime": 1080,
+    "renderMs": 4000,
+    "endless": false,
+    "seed": 1002
+  }
+}

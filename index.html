@@ -1,15 +1,19 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="in-keyboard">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#120b2e" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <title>Last Lantern</title>
-    <meta name="description" content="Carry the last light through the endless dark. A 3D roguelite survival game where your light is your life." />
+    <meta name="description" content="Carry the last light through a moonlit night that wants it out. A 3D roguelite survival game where your light is your life." />
     <link rel="stylesheet" href="/src/ui/style.css" />
   </head>
   <body>
     <div id="game-root">
-      <canvas id="game-canvas"></canvas>
+      <canvas id="game-canvas" aria-label="Last Lantern game view"></canvas>
       <div id="ui-root"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>

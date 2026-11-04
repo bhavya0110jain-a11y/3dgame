@@ -12,6 +12,11 @@ export type GameEvents = {
   'boss:spawned': { defId: string };
   'boss:killed': { defId: string };
   'chest:opened': {};
+  // --- gameplay systems (evolutions, bosses, achievements) ---
+  'weapon:evolved': { from: string; to: string; name: string };
+  'boss:enraged': { defId: string };
+  'enemy:exploded': { x: number; z: number };
+  'achievement:unlocked': { id: string; name: string };
 };
 
 type Handler<T> = (payload: T) => void;

@@ -42,6 +42,10 @@ export class Input {
 
   private onTouchStart(e: TouchEvent): void {
     this.usingTouch = true;
+    // QA BUG-QA-004: touches on UI (menus, level-up cards, HUD pause button) must not start the stick —
+    // preventDefault() below would swallow their click and block scrolling in menu screens.
+    const tgt = e.target as Element | null;
+    if (tgt && typeof tgt.closest === 'function' && tgt.closest('.screen, button, a, input, select, textarea, [data-act]')) return;
     if (this.touchId !== null) return;
     const t = e.changedTouches[0];
     this.touchId = t.identifier;

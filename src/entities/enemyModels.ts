@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { EnemyShape } from '../data/enemies';
 import { getModel } from '../render/Assets';
+import type { Enemy } from './Enemies';
 
 const ni = (g: THREE.BufferGeometry) => (g.index ? g.toNonIndexed() : g);
 const merge = (gs: THREE.BufferGeometry[]) => mergeGeometries(gs.map(ni));
@@ -115,6 +116,38 @@ function buildProcedural(shape: EnemyShape): { body: THREE.BufferGeometry; eyes:
         ]),
         eyes: merge([new THREE.BoxGeometry(0.28, 0.04, 0.05).translate(0, 1.63, 0.24)]),
       };
+    // --- gameplay-agent fallbacks for new behaviours (character artist: replace with GLBs) ---
+    case 'blob':
+      return {
+        body: merge([
+          new THREE.SphereGeometry(0.55, 12, 9).scale(1, 0.8, 1).translate(0, 0.45, 0),
+          new THREE.SphereGeometry(0.22, 8, 6).translate(-0.28, 0.85, -0.05),
+          new THREE.SphereGeometry(0.16, 8, 6).translate(0.3, 0.82, -0.12),
+        ]),
+        eyes: eyes(0.62, 0.48, 0.16, 0.08),
+      };
+    case 'bloater':
+      return {
+        body: merge([
+          new THREE.SphereGeometry(0.48, 12, 9).translate(0, 0.62, -0.05),
+          new THREE.ConeGeometry(0.12, 0.35, 6).translate(0, 1.18, -0.05),
+          new THREE.CylinderGeometry(0.05, 0.05, 0.45, 5).rotateZ(0.9).translate(-0.42, 0.25, 0.15),
+          new THREE.CylinderGeometry(0.05, 0.05, 0.45, 5).rotateZ(-0.9).translate(0.42, 0.25, 0.15),
+          new THREE.CylinderGeometry(0.05, 0.05, 0.45, 5).rotateZ(0.9).translate(-0.42, 0.25, -0.25),
+          new THREE.CylinderGeometry(0.05, 0.05, 0.45, 5).rotateZ(-0.9).translate(0.42, 0.25, -0.25),
+        ]),
+        eyes: merge([eyes(0.72, 0.42, 0.13, 0.06), new THREE.SphereGeometry(0.09, 6, 4).translate(0, 1.38, -0.05)]),
+      };
+    case 'warden':
+      return {
+        body: merge([
+          new THREE.CylinderGeometry(0.32, 0.45, 1.2, 8).translate(0, 0.7, 0),
+          new THREE.SphereGeometry(0.3, 10, 8).translate(0, 1.48, 0),
+          new THREE.CylinderGeometry(0.62, 0.62, 0.1, 14).rotateX(Math.PI / 2).translate(0, 0.85, 0.55),
+          new THREE.BoxGeometry(0.08, 1.4, 0.08).translate(0.55, 0.9, 0.1),
+        ]),
+        eyes: merge([eyes(1.52, 0.26, 0.1, 0.05), new THREE.SphereGeometry(0.12, 8, 6).translate(0, 0.85, 0.62)]),
+      };
     case 'stag': {
       const antler = (s: number) =>
         merge([
@@ -165,4 +198,273 @@ function buildProcedural(shape: EnemyShape): { body: THREE.BufferGeometry; eyes:
         eyes: eyes(1.98, 0.27, 0.09, 0.05),
       };
   }
+}
+
+// ============================================================================================ materials
+/**
+ * Per-instance FX attribute (vec4) driving the enemy body shader:
+ *   x = hit flash (0..1), y = elite aura, z = frozen/slowed, w = burning.
+ */
+export const ENEMY_FX_ATTR = 'aFx';
+
+/** Shares geometry buffers but adds a per-instance FX attribute (so batches never mutate cached models). */
+export function withEnemyFx(src: THREE.BufferGeometry, capacity: number): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  for (const [k, v] of Object.entries(src.attributes)) g.setAttribute(k, v);
+  if (src.index) g.setIndex(src.index);
+  const fx = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4);
+  fx.setUsage(THREE.DynamicDrawUsage);
+  g.setAttribute(ENEMY_FX_ATTR, fx);
+  g.boundingSphere = src.boundingSphere;
+  return g;
+}
+
+const RIM_COLOR = new THREE.Color(0.55, 0.62, 1.0);
+
+/** Lit enemy body material: vertex colours + cool moonlit rim (separates enemies from the ground at
+ *  night), white-hot hit flash, golden elite aura, icy slow tint and burning ember rim. */
+export function makeEnemyBodyMaterial(vertexColors: boolean): THREE.MeshStandardMaterial {
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.62,
+    metalness: 0.0,
+    flatShading: !vertexColors,
+    vertexColors,
+  });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uRimColor = { value: RIM_COLOR };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec4 aFx;\nvarying vec4 vFx;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFx = aFx;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec4 vFx;\nuniform vec3 uRimColor;')
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        float fxLum = dot(diffuseColor.rgb, vec3(0.3, 0.5, 0.2));
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55, 0.85, 1.0) * (0.45 + fxLum), vFx.z * 0.65);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.97, 0.94), vFx.x * 0.6);`,
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        float fxRim = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 2.2);
+        totalEmissiveRadiance += diffuseColor.rgb * (uRimColor * fxRim * 0.7 + 0.07);
+        totalEmissiveRadiance += vec3(1.0, 0.9, 0.82) * vFx.x * 0.3;
+        totalEmissiveRadiance += vec3(1.0, 0.7, 0.22) * (0.12 + fxRim * 2.2) * vFx.y;
+        totalEmissiveRadiance += vec3(0.5, 0.8, 1.0) * fxRim * vFx.z * 0.9;
+        totalEmissiveRadiance += vec3(1.0, 0.38, 0.08) * (0.15 + fxRim * 1.8) * vFx.w;`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'enemy-body-fx';
+  return mat;
+}
+
+// ============================================================================================ animation
+/** Local-space pose offsets for one enemy instance (applied on top of position / facing / scale). */
+export interface EnemyPose {
+  y: number;
+  sx: number;
+  sy: number;
+  sz: number;
+  pitch: number; // + = lean forward
+  yaw: number; // extra heading wobble
+  roll: number; // + = lean to its left
+}
+
+const sat = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/**
+ * Procedural per-shape animation for instanced enemies (no allocations): floaty ghosts, skittering
+ * crawlers, lurching brutes, slinking stalkers with a squash wind-up and stretched dash, jelly spitters
+ * that inflate before spitting, waddling bogs, stomping knights; bosses gallop / hop / glide with
+ * telegraphed wind-ups. Hit = squash punch, knockback = lean back.
+ */
+export function poseEnemy(e: Enemy, out: EnemyPose): EnemyPose {
+  const t = e.phase;
+  const v = (e.id % 7) * 0.13; // per-instance variation
+  let y = 0;
+  let sx = 1;
+  let sy = 1;
+  let sz = 1;
+  let pitch = 0;
+  let yaw = 0;
+  let roll = 0;
+  const wind = e.state === 1 && (e.def.behavior === 'dash' || e.def.behavior === 'boss');
+  const dash = e.state === 2 && (e.def.behavior === 'dash' || e.def.behavior === 'boss');
+  const k = wind ? sat(e.stateTime / (e.def.boss ? 0.9 : 0.6)) : 0;
+  switch (e.def.shape) {
+    case 'shade': {
+      y = 0.12 + Math.sin(t * 3 + v) * 0.1;
+      sy = 1 + Math.sin(t * 6 + v) * 0.045;
+      pitch = 0.16 + Math.sin(t * 3 + v + 0.8) * 0.06;
+      roll = Math.sin(t * 2 + v) * 0.09;
+      break;
+    }
+    case 'wisp': {
+      y = 0.22 + Math.sin(t * 5 + v) * 0.13;
+      sy = 1 + Math.sin(t * 10 + v) * 0.08;
+      pitch = 0.22 + Math.cos(t * 5 + v) * 0.12;
+      roll = Math.sin(t * 4 + v) * 0.16;
+      break;
+    }
+    case 'crawler': {
+      const hop = Math.abs(Math.sin(t * 15 + v));
+      y = hop * 0.07;
+      sy = 1 - (1 - hop) * 0.09 + hop * 0.04;
+      roll = Math.sin(t * 15 + v) * 0.07;
+      yaw = Math.sin(t * 8.3 + v * 3) * 0.14;
+      pitch = 0.05;
+      break;
+    }
+    case 'brute': {
+      const s = Math.sin(t * 3.1 + v);
+      const step = Math.abs(s);
+      y = step * 0.07;
+      sy = 1 - Math.pow(1 - step, 4) * 0.1 + step * 0.03;
+      roll = s * 0.11;
+      pitch = 0.1 + step * 0.05;
+      yaw = s * 0.06;
+      break;
+    }
+    case 'bog': {
+      const s = Math.sin(t * 4.2 + v);
+      y = Math.abs(s) * 0.05;
+      sy = 1 + Math.sin(t * 8.4 + v) * 0.06;
+      roll = s * 0.13;
+      yaw = s * 0.08;
+      break;
+    }
+    case 'spitter': {
+      sy = 1 + Math.sin(t * 7 + v) * 0.06;
+      y = Math.abs(Math.sin(t * 3.5 + v)) * 0.05;
+      roll = Math.sin(t * 3.5 + v) * 0.06;
+      const iv = e.def.attackInterval ?? 2.5;
+      const pre = sat(1 - e.timer / 0.55); // inflate right before spitting
+      const post = sat(1 - (iv - e.timer) / 0.25); // recoil right after
+      sx *= 1 + pre * 0.28;
+      sz *= 1 + pre * 0.28;
+      sy *= 1 + pre * 0.16 - post * 0.18;
+      pitch = -0.1 * pre - post * 0.35;
+      break;
+    }
+    case 'stalker': {
+      sy = 1 + Math.sin(t * 9 + v) * 0.03;
+      roll = Math.sin(t * 4.5 + v) * 0.06;
+      pitch = 0.22;
+      if (wind) {
+        sy = 1 - 0.32 * k;
+        sx = sz = 1 + 0.16 * k;
+        pitch = 0.22 - 0.5 * k;
+        yaw = Math.sin(t * 70) * 0.06 * k;
+      } else if (dash) {
+        sy = 0.82;
+        sx = 0.9;
+        sz = 1.4;
+        pitch = 0.5;
+      }
+      break;
+    }
+    case 'knight': {
+      const s = Math.sin(t * 3.4 + v);
+      y = Math.abs(s) * 0.05;
+      roll = s * 0.07;
+      pitch = 0.05;
+      if (wind) {
+        pitch = -0.32 * k;
+        y += 0.15 * k;
+        sy = 1 + 0.06 * k;
+        yaw = Math.sin(t * 60) * 0.04 * k;
+      } else if (dash) {
+        pitch = 0.38;
+        sz = 1.2;
+        sy = 0.92;
+      }
+      break;
+    }
+    case 'stag': {
+      const s = Math.sin(t * 5);
+      y = Math.abs(s) * 0.08;
+      pitch = s * 0.06;
+      if (wind) {
+        pitch = -0.4 * k;
+        y += 0.1 * k;
+        yaw = Math.sin(t * 40) * 0.03 * k;
+      } else if (dash) {
+        pitch = 0.16 + s * 0.05;
+        sz = 1.12;
+        y = Math.abs(Math.sin(t * 9)) * 0.12;
+      }
+      break;
+    }
+    case 'mire': {
+      const s = Math.sin(t * 2.2);
+      const hop = Math.max(0, s);
+      y = hop * 0.22;
+      sy = 1 - Math.max(0, -s) * 0.14 + hop * 0.08;
+      sx = sz = 1 / Math.sqrt(sy);
+      if (wind) {
+        sy = 1 - 0.28 * k;
+        sx = sz = 1 + 0.15 * k;
+        y = 0;
+      } else if (dash) {
+        sy = 1.12;
+        sz = 1.15;
+        y = 0.3;
+        pitch = 0.2;
+      }
+      break;
+    }
+    case 'king':
+    default: {
+      y = 0.06 + Math.sin(t * 1.5) * 0.06;
+      roll = Math.sin(t * 1.2) * 0.04;
+      sy = 1 + Math.sin(t * 3) * 0.015;
+      if (wind) {
+        y += 0.45 * k;
+        sy = 1 + 0.08 * k;
+        pitch = -0.15 * k;
+      } else if (dash) {
+        pitch = 0.28;
+        sz = 1.1;
+      }
+      break;
+    }
+  }
+  // volume-preserving squash on the vertical axis when not explicitly authored
+  if (sx === 1 && sz === 1 && sy !== 1) {
+    sx = sz = 1 / Math.sqrt(sy);
+  }
+  // hit reaction: squash punch + flinch back
+  const f = e.hitFlash;
+  if (f > 0) {
+    sy *= 1 - 0.2 * f;
+    sx *= 1 + 0.12 * f;
+    sz *= 1 + 0.12 * f;
+    pitch -= 0.25 * f;
+  }
+  // knockback: lean away from the push (local space)
+  const sf = Math.sin(e.facing);
+  const cf = Math.cos(e.facing);
+  const kbF = e.kbx * sf + e.kbz * cf;
+  const kbS = e.kbx * cf - e.kbz * sf;
+  pitch += Math.max(-0.5, Math.min(0.5, kbF * 0.05));
+  roll += Math.max(-0.4, Math.min(0.4, -kbS * 0.04));
+  out.y = y;
+  out.sx = sx;
+  out.sy = sy;
+  out.sz = sz;
+  out.pitch = pitch;
+  out.yaw = yaw;
+  out.roll = roll;
+  return out;
+}
+
+/** Shared scratch pose (single-threaded render loop: reuse to avoid per-frame allocations). */
+export const POSE_SCRATCH: EnemyPose = { y: 0, sx: 1, sy: 1, sz: 1, pitch: 0, yaw: 0, roll: 0 };
+const poseEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+/** Writes facing + pose lean into a quaternion. */
+export function poseQuaternion(facing: number, p: EnemyPose, out: THREE.Quaternion): THREE.Quaternion {
+  poseEuler.set(p.pitch, facing + p.yaw, p.roll, 'YXZ');
+  return out.setFromEuler(poseEuler);
 }

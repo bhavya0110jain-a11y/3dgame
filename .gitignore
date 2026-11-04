@@ -180,4 +180,6 @@ $RECYCLE.BIN/
 node_modules/
 dist/
 release/
+# ...but production/release/ holds release docs (checklist, CI template), not build output.
+!production/release/
 *.blend1

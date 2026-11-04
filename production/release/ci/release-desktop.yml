@@ -1,0 +1,111 @@
+# Last Lantern: desktop + web release pipeline (TEMPLATE).
+# To enable, copy it to .github/workflows/release-desktop.yml (backlog P0-9). Triggered by pushing a tag `v*`
+# or by hand. Builds signed installers on native runners (cross-building Win/Mac from Linux is unreliable),
+# then optionally pushes to itch.io (butler) and Steam (steamcmd).
+#
+# Secrets (GitHub → Settings → Environments → "release"):
+#   WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD           Windows code-signing cert (base64 .pfx) or use Azure Trusted Signing
+#   CSC_LINK / CSC_KEY_PASSWORD                   Apple Developer ID Application cert (base64 .p12)
+#   APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID   notarization
+#   BUTLER_API_KEY, ITCH_TARGET (e.g. studio/last-lantern)
+#   STEAM_USERNAME, STEAM_CONFIG_VDF (steamcmd login cache), LL_STEAM_APPID
+name: Release (desktop + web)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Upload to itch.io / Steam beta branch'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - run: npm ci
+      - run: npx playwright@1.63.0 install --with-deps chromium
+      - run: npm run typecheck && npm test
+      - run: node tools/package-web.mjs --build --verify
+      - uses: actions/upload-artifact@v4
+        with: { name: web, path: release/last-lantern-web.zip }
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            targets: 'win:nsis win:zip win:dir'
+          - os: macos-latest
+            targets: 'mac:dmg mac:zip mac:dir'
+          - os: ubuntu-latest
+            targets: 'linux:AppImage linux:tar.gz linux:dir'
+    runs-on: ${{ matrix.os }}
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - run: npm ci
+      - name: Package
+        shell: bash
+        run: node tools/package-desktop.mjs --build ${{ matrix.targets }}
+        env:
+          CSC_LINK: ${{ runner.os == 'Windows' && secrets.WIN_CSC_LINK || secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
+      - name: Desktop smoke (Linux, packaged app boots and starts a run)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y xvfb
+          LL_SMOKE_SCREENSHOT=release/desktop-smoke.png LL_SMOKE_DELAY=8000 LL_SMOKE_PLAY=6000 \
+            xvfb-run -a release/desktop/linux-unpacked/last-lantern --no-sandbox
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}
+          path: |
+            release/desktop/*.exe
+            release/desktop/*.zip
+            release/desktop/*.dmg
+            release/desktop/*.AppImage
+            release/desktop/*.tar.gz
+            release/desktop-smoke.png
+          if-no-files-found: warn
+
+  upload-itch:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.upload }}
+    needs: [web, desktop]
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: butler push
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          curl -sSL -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+          unzip -q butler.zip && chmod +x butler
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./butler push web/last-lantern-web.zip "${{ secrets.ITCH_TARGET }}:html5" --userversion "$VERSION"
+          # Desktop channels: push the zip/tar.gz artifacts (itch app installs and patches them)
+          for f in desktop-Windows/*-win-x64.zip; do ./butler push "$f" "${{ secrets.ITCH_TARGET }}:windows" --userversion "$VERSION"; done
+          for f in desktop-macOS/*-mac-universal.zip; do ./butler push "$f" "${{ secrets.ITCH_TARGET }}:mac" --userversion "$VERSION"; done
+          for f in desktop-Linux/*-linux-x64.tar.gz; do ./butler push "$f" "${{ secrets.ITCH_TARGET }}:linux" --userversion "$VERSION"; done
+
+  # Steam upload: run steamcmd with the app_build VDF from docs/store/steam-integration.md §4 against the
+  # *-unpacked dir builds (needs the dir targets as artifacts, and with --steam if achievements are on).
+  # Kept manual until the App ID exists. Set live on the `beta` branch, smoke test, then promote to default.

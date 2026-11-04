@@ -12,5 +12,8 @@ export const PASSIVES: PassiveDef[] = [
   { id: 'quill', name: 'Swift Quill', icon: 'quill', maxLevel: 5, description: '+10% projectile speed, +10% duration.', apply: (s) => { s.projectileSpeed += 0.1; s.duration += 0.1; } },
   { id: 'twin', name: 'Twin Flame', icon: 'twin', maxLevel: 2, description: '+1 projectile / orbiter for all weapons.', apply: (s) => (s.amount += 1) },
   { id: 'clover', name: 'Ashen Clover', icon: 'luck', maxLevel: 5, description: '+10% luck and +3% critical chance.', apply: (s) => { s.luck += 0.1; s.critChance += 0.03; } },
+  // unlockable relics (achievements)
+  { id: 'mirror', name: 'Moon Mirror', icon: 'mirror', maxLevel: 5, unlock: 'r_mirror', description: '+20% critical damage and +2% critical chance.', apply: (s) => { s.critMult += 0.2; s.critChance += 0.02; } },
+  { id: 'hourglass', name: 'Dusk Hourglass', icon: 'hourglass', maxLevel: 5, unlock: 'r_hourglass', description: '+12% duration and -4% cooldowns.', apply: (s) => { s.duration += 0.12; s.cooldown *= 0.96; } },
   { id: 'tome', name: 'Keeper\'s Tome', icon: 'tome', maxLevel: 5, description: '+8% experience gained.', apply: (s) => (s.growth += 0.08) },
 ];
