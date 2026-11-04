@@ -1,9 +1,11 @@
 import { Game } from './game/Game';
 import { loadAssets } from './render/Assets';
+import { WEAPONS } from './data/weapons';
 
 declare global {
   interface Window {
     __game?: Game;
+    __weapons?: typeof WEAPONS;
   }
 }
 
@@ -18,6 +20,7 @@ async function boot(): Promise<void> {
   bar.remove();
   const game = new Game(canvas);
   window.__game = game;
+  window.__weapons = WEAPONS;
 }
 
 boot().catch((err) => {

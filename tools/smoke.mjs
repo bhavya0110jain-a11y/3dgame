@@ -12,7 +12,7 @@ import { mkdirSync } from 'node:fs';
 
 const outDir = resolve(process.argv[2] ?? 'production/qa/evidence');
 mkdirSync(outDir, { recursive: true });
-const dist = resolve('dist');
+const dist = resolve(process.env.DIST ?? 'dist');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.glb': 'model/gltf-binary', '.png': 'image/png', '.json': 'application/json', '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
 const server = createServer(async (req, res) => {
   const url = decodeURIComponent((req.url ?? '/').split('?')[0]);
@@ -60,6 +60,35 @@ for (let i = 0; i < 14; i++) {
 await page.evaluate(() => { window.__game.debug.timeScale = 1; });
 await page.waitForTimeout(400);
 await page.screenshot({ path: join(outDir, 'smoke-03-gameplay.png') });
+
+// Dense combat: spawn a crowd of every enemy type around the player + give extra weapons.
+await page.evaluate(() => {
+  const g = window.__game;
+  const ids = ['shade', 'crawler', 'wisp', 'brute', 'stalker', 'spitter', 'bog_lurker', 'knight'];
+  for (let i = 0; i < 160; i++) {
+    const a = (i / 160) * Math.PI * 2 * 3;
+    const r = 4 + (i % 10);
+    g.enemies.spawn(ids[i % ids.length], g.player.x + Math.cos(a) * r, g.player.z + Math.sin(a) * r);
+  }
+  for (const id of ['cinder_halo', 'spark_chain', 'brazier']) {
+    if (!g.run.weapons.some((w) => w.def.id === id)) {
+      const def = (window.__weapons ?? []).find?.((w) => w.id === id);
+      if (def) g.run.weapons.push(def.create(g));
+    }
+  }
+  g.player.invuln = 999;
+});
+await page.waitForTimeout(1500);
+await page.screenshot({ path: join(outDir, 'smoke-06-combat.png') });
+// Boss close-up
+await page.evaluate(() => {
+  const g = window.__game;
+  g.enemies.clear();
+  g.enemies.spawn(g.world.biome.bossId, g.player.x, g.player.z - 7);
+});
+await page.waitForTimeout(1200);
+await page.screenshot({ path: join(outDir, 'smoke-07-boss.png') });
+await page.evaluate(() => { window.__game.player.invuln = 0; });
 const summary = await page.evaluate(() => {
   const g = window.__game;
   return { state: g.state, elapsed: g.run.elapsed.toFixed(1), level: g.run.level, kills: g.run.kills, enemies: g.enemies.activeCount, weapons: g.run.weapons.map((w) => w.def.id + ':' + w.level), light: Math.round(g.player.lightValue) };
