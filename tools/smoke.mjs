@@ -60,6 +60,7 @@ for (let i = 0; i < 14; i++) {
   await page.evaluate(() => {
     const g = window.__game;
     for (let k = 0; k < 45 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+    g.renderer.rig.snap(g.player.x, g.player.z); // fast-forward outruns the dt-smoothed camera on ~1 fps SwiftShader
   });
   await page.waitForTimeout(700);
   const state = await page.evaluate(() => window.__game.state);
@@ -101,6 +102,7 @@ await page.evaluate(() => {
     }
   }
   g.player.invuln = 999;
+  g.renderer.rig.snap(g.player.x, g.player.z);
 });
 await page.waitForTimeout(1500);
 await page.screenshot({ path: join(outDir, 'smoke-06-combat.png') });
