@@ -60,6 +60,11 @@ export interface Enemy {
   /** Seconds into the death animation; -1 while alive. Dying enemies are already inactive (no collision,
    *  targeting or damage) and are only kept around for rendering until the animation ends. */
   dying: number;
+  /** Seconds until this enemy may deal contact damage again (CONTACT_COOLDOWN). */
+  contactCd: number;
+  /** Damage-number merge handle (FxManager.damageNumber): hits within the merge window add to one number. */
+  numSlot: number;
+  numSerial: number;
 }
 
 /** Render quality tier (matches Renderer's Quality / save.settings.quality). */
@@ -108,6 +113,30 @@ interface Batch {
 export const HORDE_LOD_ON = 170;
 export const HORDE_LOD_OFF = 130;
 
+/** Seconds between two contact hits from the same enemy (a pack pressing into the bearer no longer melts her
+ *  in one frame-burst; the player's own 0.35 s i-frames still apply on top). */
+export const CONTACT_COOLDOWN = 0.8;
+/** A boss neither attacks nor deals contact damage during its first seconds on the field. */
+export const BOSS_GRACE = 2.5;
+/** Hit flash: re-triggers only below this value (no white strobe under rapid ticks); decay per second. */
+export const FLASH_REFRACTORY = 0.3;
+export const FLASH_DECAY = 12;
+/** Hit-flash strength per tier, and the crowd rule: with many enemies flashing at once each flash is scaled by
+ *  1 - FLASH_CROWD_CUT * smoothstep(FLASH_CROWD_LO, FLASH_CROWD_HI, flashing). */
+export const FLASH_BOSS = 0.35;
+export const FLASH_ELITE = 0.6;
+export const FLASH_CROWD_LO = 80;
+export const FLASH_CROWD_HI = 200;
+export const FLASH_CROWD_CUT = 0.5;
+/** Non-crit damage numbers are hidden above this many live enemies (crits always show). */
+export const NUMBERS_CROWD = 150;
+
+/** Flash multiplier for a crowd of `flashing` enemies (see FLASH_CROWD_*). */
+export function flashCrowdScale(flashing: number): number {
+  const t = Math.min(1, Math.max(0, (flashing - FLASH_CROWD_LO) / (FLASH_CROWD_HI - FLASH_CROWD_LO)));
+  return 1 - FLASH_CROWD_CUT * t * t * (3 - 2 * t);
+}
+
 export interface DamageOpts {
   knockback?: number; // impulse strength
   fromX?: number;
@@ -144,6 +173,15 @@ export class EnemyManager {
   renderQuality: EnemyRenderQuality | null = null;
   private appliedQuality: EnemyRenderQuality | null = null;
   private hordeLod = false;
+  /** Enemies whose hit flash was visible last frame (drives the crowd flash scale). */
+  flashing = 0;
+  private flashScale = 1;
+  /** Hit-cooldown tick (Map.forEach callback, bound once: no per-frame closure/iterator allocation). */
+  private cdDt = 0;
+  private readonly tickCd = (v: number, k: string, m: Map<string, number>): void => {
+    if (v - this.cdDt <= 0) m.delete(k);
+    else m.set(k, v - this.cdDt);
+  };
 
   constructor(private scene: THREE.Scene) {
     for (const def of Object.values(ENEMIES)) this.ensureBatch(def);
@@ -236,44 +274,45 @@ export class EnemyManager {
       ({ hitCd: new Map() } as unknown as Enemy);
     const elite = !!opts.elite;
     const hpMul = (opts.hpMul ?? 1) * (def.boss ? 1 : this.hpMul) * (elite ? 8 : 1);
-    Object.assign(e, {
-      id: this.nextId++,
-      active: true,
-      def,
-      x,
-      z,
-      vx: 0,
-      vz: 0,
-      kbx: 0,
-      kbz: 0,
-      hp: def.hp * hpMul,
-      maxHp: def.hp * hpMul,
-      radius: def.radius * (elite ? 1.5 : 1),
-      scale: def.scale * (elite ? 1.5 : 1),
-      damage: def.damage * this.damageMul * (elite ? 1.5 : 1),
-      speedMul: 0.9 + Math.random() * 0.2,
-      hitFlash: 0,
-      slowTimer: 0,
-      burnTimer: 0,
-      burnDps: 0,
-      phase: Math.random() * 10,
-      timer: (def.attackInterval ?? 3) * (0.5 + Math.random()),
-      state: 0,
-      stateTime: 0,
-      elite,
-      facing: 0,
-      burnSource: 'brazier',
-      shield: (def.shield ?? 0) * hpMul,
-      maxShield: (def.shield ?? 0) * hpMul,
-      sinceHit: 0,
-      aux: 0,
-      aux2: 0,
-      enraged: false,
-      lastPattern: -1,
-      age: 0,
-      dying: -1,
-    });
-    if (def.boss) e.timer = 2.5;
+    // field-by-field reset (BUG-QA-016: no per-spawn object literal)
+    e.id = this.nextId++;
+    e.active = true;
+    e.def = def;
+    e.x = x;
+    e.z = z;
+    e.vx = 0;
+    e.vz = 0;
+    e.kbx = 0;
+    e.kbz = 0;
+    e.hp = def.hp * hpMul;
+    e.maxHp = def.hp * hpMul;
+    e.radius = def.radius * (elite ? 1.5 : 1);
+    e.scale = def.scale * (elite ? 1.5 : 1);
+    e.damage = def.damage * this.damageMul * (elite ? 1.5 : 1);
+    e.speedMul = 0.9 + Math.random() * 0.2;
+    e.hitFlash = 0;
+    e.slowTimer = 0;
+    e.burnTimer = 0;
+    e.burnDps = 0;
+    e.phase = Math.random() * 10;
+    e.timer = def.boss ? BOSS_GRACE : (def.attackInterval ?? 3) * (0.5 + Math.random());
+    e.state = 0;
+    e.stateTime = 0;
+    e.elite = elite;
+    e.facing = 0;
+    e.burnSource = 'brazier';
+    e.shield = (def.shield ?? 0) * hpMul;
+    e.maxShield = (def.shield ?? 0) * hpMul;
+    e.sinceHit = 0;
+    e.aux = 0;
+    e.aux2 = 0;
+    e.enraged = false;
+    e.lastPattern = -1;
+    e.age = 0;
+    e.dying = -1;
+    e.contactCd = 0;
+    e.numSlot = -1;
+    e.numSerial = 0;
     e.hitCd.clear();
     this.list.push(e);
     if (def.boss) {
@@ -382,7 +421,8 @@ export class EnemyManager {
     }
     const dealt = Math.min(dmg, Math.max(0, e.hp));
     e.hp -= dmg;
-    e.hitFlash = 1;
+    // refractory: rapid ticks (Cinder Halo, beams) don't keep re-whitening the body
+    if (e.hitFlash < FLASH_REFRACTORY) e.hitFlash = 1;
     const src = opts.source ?? 'other';
     if (dealt > 0) ctx.run.addDamage(src, dealt);
     if (opts.knockback && opts.fromX !== undefined && opts.fromZ !== undefined) {
@@ -395,9 +435,15 @@ export class EnemyManager {
     }
     // VFX: directional impact sparks (also tags the next damage number with the source's colour)
     ctx.fx.hit(e.x, 0.9 * e.scale, e.z, opts.fromX !== undefined ? e.x - opts.fromX : 0, opts.fromZ !== undefined ? e.z - opts.fromZ : 0, src, crit, e.scale);
-    if (ctx.save.settings.damageNumbers) {
+    if (ctx.save.settings.damageNumbers && (crit || this.activeCount <= NUMBERS_CROWD)) {
       const shown = warded && dmg <= 0 ? amount : dmg;
-      ctx.fx.text(e.x, 1.4 * e.scale + 0.4, e.z, Math.round(shown).toString(), crit ? 'ft-crit' : warded ? 'ft-blue' : opts.color ?? '');
+      const cls = crit ? 'ft-crit' : warded ? 'ft-blue' : opts.color ?? '';
+      // hits on the same enemy within the merge window add up in one number instead of stacking new ones
+      if (!ctx.fx.addToNumber(e.numSlot, e.numSerial, shown, crit)) {
+        const slot = ctx.fx.damageNumber(e.x, 1.4 * e.scale + 0.4, e.z, shown, cls);
+        e.numSlot = slot;
+        e.numSerial = slot >= 0 ? ctx.fx.numberSerial(slot) : 0;
+      }
     }
     ctx.events.emit('enemy:hit', { x: e.x, z: e.z, damage: dmg, crit });
     if (e.hp <= 0) {
@@ -535,6 +581,7 @@ export class EnemyManager {
     for (const e of this.list) this.hash.insert(e);
     this.updateHazards(dt, ctx);
 
+    let flashing = 0;
     for (const e of this.list) {
       if (!e.active) continue;
       const def = e.def;
@@ -542,10 +589,14 @@ export class EnemyManager {
       e.age += dt;
       e.stateTime += dt;
       e.sinceHit += dt;
-      if (e.hitFlash > 0) e.hitFlash = Math.max(0, e.hitFlash - dt * 6);
-      for (const [k, v] of e.hitCd) {
-        if (v - dt <= 0) e.hitCd.delete(k);
-        else e.hitCd.set(k, v - dt);
+      if (e.contactCd > 0) e.contactCd -= dt;
+      if (e.hitFlash > 0) {
+        e.hitFlash = Math.max(0, e.hitFlash - dt * FLASH_DECAY);
+        if (e.hitFlash > 0.05) flashing++;
+      }
+      if (e.hitCd.size > 0) {
+        this.cdDt = dt;
+        e.hitCd.forEach(this.tickCd);
       }
       if (e.burnTimer > 0) {
         e.burnTimer -= dt;
@@ -709,10 +760,12 @@ export class EnemyManager {
         e.facing += d * Math.min(1, dt * 8);
       }
 
-      // contact damage
+      // contact damage: once per CONTACT_COOLDOWN per enemy (only spent when the hit actually landed);
+      // a boss is harmless while it emerges
       const cr = e.radius + player.radius;
-      if (dist < cr && !player.dead) {
+      if (dist < cr && !player.dead && e.contactCd <= 0 && player.invuln <= 0 && !(def.boss && e.age < BOSS_GRACE)) {
         player.damage(e.damage, ctx);
+        e.contactCd = CONTACT_COOLDOWN;
       }
 
       // despawn far-away stragglers by relocating them ahead of the player
@@ -723,6 +776,8 @@ export class EnemyManager {
       }
     }
 
+    this.flashing = flashing;
+    this.flashScale = flashCrowdScale(flashing);
     this.updateLod(ctx);
     this.writeInstances(time);
   }
@@ -753,7 +808,7 @@ export class EnemyManager {
     switch (e.state) {
       case 0: {
         e.timer -= dt;
-        if (e.timer > 0) return;
+        if (e.timer > 0 || e.age < BOSS_GRACE) return;
         let idx = Math.floor(ctx.rng.next() * patterns.length);
         if (idx === e.lastPattern && patterns.length > 1) idx = (idx + 1) % patterns.length;
         e.lastPattern = idx;
@@ -947,12 +1002,21 @@ export class EnemyManager {
     tmpM.compose(tmpP, tmpQ, tmpS);
     p.body.setMatrixAt(i, tmpM);
     p.eyes.setMatrixAt(i, tmpM);
-    // base tint (white for vertex-coloured GLB models); elites run slightly warmer
+    // base tint (white for vertex-coloured GLB models); elites run a touch darker and cooler (their crimson
+    // aura carries the read; warm tints are reserved for the player's side)
     tmpC.setHex(b.tint);
-    if (e.elite) tmpC.multiplyScalar(1.08).offsetHSL(0.02, 0.05, 0);
+    if (e.elite) tmpC.multiplyScalar(0.92).offsetHSL(-0.03, 0.04, 0);
     p.body.setColorAt(i, tmpC);
     const alive = e.dying < 0;
     const burn = alive && e.burnTimer > 0 ? 0.65 + 0.35 * Math.sin(time * 14 + e.id) : 0;
-    p.fx.setXYZW(i, pose.flash, e.elite ? 0.75 + 0.25 * Math.sin(time * 4 + e.id) : 0, alive && e.slowTimer > 0 ? 1 : 0, burn);
+    // hit flash: softer for bosses / elites, and the whole horde's flash dims when many enemies flash at once
+    // (spawn darkness < 0 passes through; the exploder's primed pulse is a gameplay tell and stays full)
+    let flash = pose.flash;
+    if (flash > 0) {
+      const tier = e.def.boss ? (alive ? FLASH_BOSS : 0.6) : e.elite ? FLASH_ELITE : 1;
+      const primed = alive && e.state === 3 && e.def.behavior === 'exploder';
+      if (!primed) flash *= tier * this.flashScale;
+    }
+    p.fx.setXYZW(i, flash, e.elite ? 0.75 + 0.25 * Math.sin(time * 4 + e.id) : 0, alive && e.slowTimer > 0 ? 1 : 0, burn);
   }
 }

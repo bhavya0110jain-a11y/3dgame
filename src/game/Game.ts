@@ -58,6 +58,14 @@ export type LevelMode = 'levelup' | 'chest' | 'dawn';
 const DIGITS = ['Digit1', 'Digit2', 'Digit3', 'Digit4'];
 /** Seconds between the boss kill and the dawn/endless choice (lets the death VFX + Ash fountain play). */
 const DAWN_DELAY_MS = 2200;
+/**
+ * Boss collapse outro: after the night's master falls the run keeps simulating for BOSS_OUTRO_TIME seconds of game
+ * time (≥ the 1.2 s collapse) before any level-up or the dawn choice may open, and the first BOSS_SLOWMO_TIME real
+ * seconds play at BOSS_SLOWMO speed. Only armed when a live boss actually died (not for synthetic events).
+ */
+export const BOSS_OUTRO_TIME = 1.3;
+export const BOSS_SLOWMO = 0.35;
+export const BOSS_SLOWMO_TIME = 0.6;
 /** Largest simulation step when debug.timeScale > 1 (BUG-QA-009: big steps tunnel fast projectiles). */
 const MAX_SUBSTEP = 1 / 30;
 
@@ -118,6 +126,10 @@ export class Game implements GameContext {
   private chestTimer = 0;
   private appliedQuality: string | null = null;
   private dawnPending = false;
+  /** Game seconds of boss-collapse outro left (level-ups / dawn wait for 0). */
+  private outroT = 0;
+  /** Real seconds of boss-kill slow-mo left. */
+  private slowT = 0;
   /** Boss id of the last kill that will open the dawn choice. */
   private dawnBoss = '';
   /** What the last reliquary gave (null before the first one this run). */
@@ -171,6 +183,13 @@ export class Game implements GameContext {
   // ------------------------------------------------------------------ context
   shake(intensity: number): void {
     if (this.save.settings.screenShake) this.shakeAmt = Math.min(1, this.shakeAmt + intensity);
+  }
+
+  /** World announcement banner via UI.announce (feature-detected), else the Fx 'ft-big' banner (BUG-QA-019). */
+  announce(text: string, kind: 'info' | 'elite' | 'boss' | 'danger' | 'buff'): void {
+    const ui = this.ui as unknown as { announce?: (t: string, k?: string) => void };
+    if (typeof ui.announce === 'function') ui.announce(text, kind);
+    else this.fx.text(this.player.x, 3.5, this.player.z, text, 'ft-big');
   }
 
   persist(): void {
@@ -237,7 +256,7 @@ export class Game implements GameContext {
       const p = this.player;
       this.fx.ring(p.x, p.z, 0xffd27a, 0.6, 14, 1.1);
       this.fx.burst(p.x, 1.4, p.z, 0xffe0a0, 90, 9, 1.1);
-      this.fx.text(p.x, 3.2, p.z, 'Your lantern flares!', 'ft-heal');
+      this.announce('Your lantern flares!', 'buff');
       this.renderer.damagePulse = 0;
     });
     ev.on('enemy:hit', ({ crit }) => this.audio.play(crit ? 'crit' : 'hit'));
@@ -272,11 +291,11 @@ export class Game implements GameContext {
     ev.on('boss:spawned', () => {
       this.audio.play('boss');
       // first-run players get the (longer) onboarding hint instead — one message at a time on a busy moment
-      if (!(tut.active && tut.show('boss'))) this.ui.toast('The master of this night has come.', 3500);
+      if (!(tut.active && tut.show('boss'))) this.announce('The master of this night has come.', 'boss');
     });
     ev.on('boss:enraged', ({ defId }) => {
       this.audio.play('boss');
-      this.ui.toast(`${ENEMIES[defId]?.name ?? 'The master'} is enraged!`, 2500);
+      this.announce(`${ENEMIES[defId]?.name ?? 'The master'} is enraged!`, 'boss');
     });
     ev.on('achievement:unlocked', ({ name }) => {
       if (this.state !== 'gameover') this.ui.toast(`Achievement: ${name}`, 3000);
@@ -288,13 +307,18 @@ export class Game implements GameContext {
       if (this.run.endless || this.run.victory) return; // endless bosses just pay out
       this.run.victory = true;
       this.dawnBoss = defId;
+      // the master's collapse plays out (slow-mo, no choice screens) before the dawn — only for a real boss death
+      if (this.enemies.boss) {
+        this.outroT = BOSS_OUTRO_TIME;
+        this.slowT = BOSS_SLOWMO_TIME;
+      }
       // BUG-QA-001: the timer belongs to THIS run — a restart within 2.2 s must not inherit the dawn choice.
       // BUG-QA-002: it only flags the choice; updateRun/afterChoice/closeChest open it whenever play resumes.
       const run = this.run;
       window.setTimeout(() => {
         if (this.run !== run || this.state === 'gameover' || this.state === 'menu') return;
         this.dawnPending = true;
-        if (this.state === 'playing') this.openDawnChoice();
+        if (this.state === 'playing' && this.outroT <= 0) this.openDawnChoice();
       }, DAWN_DELAY_MS);
     });
   }
@@ -317,6 +341,8 @@ export class Game implements GameContext {
     this.run.banishes = 1 + (this.save.meta['m_banish'] ?? 0);
     this.run.skips = 1;
     this.dawnPending = false;
+    this.outroT = 0;
+    this.slowT = 0;
     this.dawnBoss = '';
     this.lastChest = null;
     this.lastDawn = null;
@@ -572,9 +598,12 @@ export class Game implements GameContext {
       if (this.state === 'playing' || this.state === 'paused') this.togglePause();
     }
     if (this.state === 'levelup') {
-      const banish = inp.keys.has('ShiftLeft') || inp.keys.has('ShiftRight');
+      // BUG-QA-017: Shift is read with the digit's keydown (a quick tap released before this frame still banishes)
+      const held = inp.keys.has('ShiftLeft') || inp.keys.has('ShiftRight');
+      const shifted = (inp as { pressedWithShift?: (code: string) => boolean }).pressedWithShift;
       for (let k = 0; k < 4; k++) {
         if (inp.pressed(DIGITS[k])) {
+          const banish = typeof shifted === 'function' ? shifted.call(inp, DIGITS[k]) || held : held;
           if (banish) this.banishUpgrade(k);
           else this.chooseUpgrade(k);
         }
@@ -598,6 +627,10 @@ export class Game implements GameContext {
     const now = performance.now();
     let dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
+    if (this.slowT > 0 && this.state === 'playing') {
+      this.slowT -= dt;
+      dt *= BOSS_SLOWMO;
+    }
     dt *= this.debug.timeScale;
     this.time += dt;
     this.input.update();
@@ -629,6 +662,7 @@ export class Game implements GameContext {
   private updateRun(dt: number): void {
     const run = this.run;
     run.elapsed += dt;
+    if (this.outroT > 0) this.outroT -= dt;
     this.player.update(dt, this, this.time);
     this.world.update(this.player.x, this.player.z);
     this.director.update(dt, this);
@@ -652,8 +686,9 @@ export class Game implements GameContext {
       this.endRun(run.victory);
       return;
     }
-    if (this.state === 'playing' && run.pendingLevelUps > 0) this.openLevelUp();
-    else if (this.state === 'playing' && this.dawnPending) this.openDawnChoice();
+    if (this.state !== 'playing' || this.outroT > 0) return; // boss collapse outro: no choice screens yet
+    if (run.pendingLevelUps > 0) this.openLevelUp();
+    else if (this.dawnPending) this.openDawnChoice();
   }
 
   private updateMenu(dt: number): void {
@@ -676,6 +711,7 @@ export class Game implements GameContext {
     const rig = this.renderer.rig;
     // trauma decays linearly; the rig squares it (small hits = subtle, big hits = punchy)
     this.shakeAmt = Math.max(0, this.shakeAmt - dt * 1.6);
+    p.setXray?.(this.state !== 'menu'); // optional: test doubles of Player may omit it
     if (this.state === 'menu') {
       rig.menu(dt, p.x, p.z);
     } else {

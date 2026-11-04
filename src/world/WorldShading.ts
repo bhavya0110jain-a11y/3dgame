@@ -60,11 +60,15 @@ export const GLOOM_PARS = /* glsl */ `
     vec3 sat = max(vec3(0.0), mix(vec3(l2), col, 1.12));
     vec3 amber = vec3(l2) * vec3(1.78, 0.8, 0.3);
     float greenish = saturate((col.g - max(col.r, col.b)) * 2.0 / max(l2, 1e-3));
-    vec3 warm = mix(sat, amber, 0.5 + 0.4 * greenish) * vec3(1.03, 0.97, 0.88);
+    float reddish = saturate((col.r - 2.6 * col.g) / max(col.r, 1e-3) * 1.6) * (1.0 - greenish);
+    vec3 warm = mix(sat, amber, 0.5 + 0.4 * max(greenish, reddish)) * vec3(1.03, 0.97, 0.88);
     col = mix(col, warm, inside * scale);
     return col;
   }
   float ditherIGN(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+  /** 4×4 ordered Bayer threshold in [0, 15/16] for integer cell coordinates. */
+  float bayer2x2(vec2 a) { a = floor(a); return fract(a.x * 0.5 + a.y * a.y * 0.75); }
+  float bayer4x4(vec2 a) { return bayer2x2(a * 0.5) * 0.25 + bayer2x2(a); }
 `;
 
 export interface WorldPatchOptions {
@@ -82,7 +86,23 @@ export interface WorldPatchOptions {
    * as murky blobs. Tinted by the night's moon colour (rimUniforms.uRimTint). 0 = off.
    */
   rim?: number;
+  /**
+   * Soft-knee compression of DIRECT light above ~0.3 (lit materials only): a rock or crown a metre from the lantern
+   * otherwise blows out to cream (art review s3: over-bright props next to the bearer). Moonlit values are untouched.
+   * 0 = off; ~1 = strong.
+   */
+  soften?: number;
 }
+
+const SOFTEN_FRAGMENT = /* glsl */ `
+  {
+    vec3 dd = reflectedLight.directDiffuse;
+    float dm = max(dd.r, max(dd.g, dd.b));
+    float k = 1.0 + max(dm - 0.3, 0.0) * WORLD_SOFTEN;
+    reflectedLight.directDiffuse = dd / k;
+    reflectedLight.directSpecular /= k;
+  }
+`;
 
 const RIM_FRAGMENT = /* glsl */ `
   {
@@ -126,14 +146,24 @@ const WORLD_POS_VERTEX = /* glsl */ `
   }
 `;
 
+/**
+ * Occlusion cut-away for tall props (crowns, pillars, walls) between the camera and the bearer. A capsule around
+ * the camera→bearer segment is cleared with a 4×4 ordered Bayer halftone at a 2-px cell: inside 2.8 m (scaled with
+ * the camera distance, so zooming out widens it) every fragment is discarded, and the 2.8–5.5 m band ramps out as a
+ * clean halftone instead of static. Low crowns fade too (height gate 0.4–1.2 m); the near-camera end and the
+ * bearer's own feet are spared (t gate) so the ground-level silhouette of a trunk next to her stays.
+ */
 const DITHER_FRAGMENT = /* glsl */ `
   {
     vec3 a = uPlayer + vec3(0.0, 1.0, 0.0);
     vec3 ab = cameraPosition - a;
-    float t = clamp(dot(vGWorld - a, ab) / dot(ab, ab), 0.0, 1.0);
+    float abl2 = dot(ab, ab);
+    float t = clamp(dot(vGWorld - a, ab) / abl2, 0.0, 1.0);
     float dist = length(vGWorld - (a + ab * t));
-    float fade = (1.0 - smoothstep(1.6, 3.4, dist)) * smoothstep(0.02, 0.08, t) * smoothstep(0.7, 1.6, vGWorld.y);
-    if (fade * 0.8 > ditherIGN(gl_FragCoord.xy)) discard;
+    // 23.5 m = camera→focus distance at zoom 1 (CameraRig HEIGHT/BACK); menu close-ups shrink the capsule
+    float occS = clamp(sqrt(abl2) / 23.5, 0.35, 1.6);
+    float fade = (1.0 - smoothstep(2.8 * occS, 5.5 * occS, dist)) * smoothstep(0.015, 0.06, t) * smoothstep(0.4, 1.2, vGWorld.y);
+    if (fade > bayer4x4(floor(gl_FragCoord.xy * 0.5)) + 0.03125) discard;
   }
 `;
 
@@ -143,6 +173,7 @@ export function patchWorldMaterial<T extends THREE.Material>(mat: T, opts: World
   const gloom = opts.gloom ?? 1;
   const dither = !!opts.dither;
   const rim = opts.rim ?? 0;
+  const soften = opts.soften ?? 0;
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, renderer) => {
     prev?.call(mat, shader, renderer);
@@ -162,13 +193,17 @@ export function patchWorldMaterial<T extends THREE.Material>(mat: T, opts: World
         `#include <common>\n${GLOOM_PARS}\nvarying vec3 vGWorld;` +
           (rim > 0 ? `\nuniform vec3 uRimTint;\n#define WORLD_RIM ${rim.toFixed(3)}` : ''),
       )
+      .replace(
+        '#include <lights_fragment_end>',
+        soften > 0 ? `#include <lights_fragment_end>\n#define WORLD_SOFTEN ${soften.toFixed(3)}\n${SOFTEN_FRAGMENT}` : '#include <lights_fragment_end>',
+      )
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${dither ? DITHER_FRAGMENT : ''}`)
       .replace(
         '#include <opaque_fragment>',
         `outgoingLight = applyGloom(outgoingLight, vGWorld, ${gloom.toFixed(3)});\n${rim > 0 ? RIM_FRAGMENT : ''}#include <opaque_fragment>`,
       );
   };
-  const key = `world:${wind}:${gloom}:${dither}:${rim}`;
+  const key = `world:${wind}:${gloom}:${dither}:${rim}:${soften}`;
   const prevKey = mat.customProgramCacheKey.bind(mat);
   mat.customProgramCacheKey = () => prevKey() + key;
   return mat;

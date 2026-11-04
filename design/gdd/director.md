@@ -20,8 +20,10 @@ splitters; 24 / 30 / 36 / 44 enemies), "Cinders on the wind" tick rush every 210
 - `hpScale(m) = (1 + 0.15m + 0.9(m/10)²) × (1 + LATE_HP·L²)`, `L = clamp(min(m,15) − LATE_FROM, 0, 8) / 8`,
   `LATE_HP = 2.5`, `LATE_FROM = 7` → 1.0 @0, 1.98 @5, 2.88 @8, 4.6 @10, 8.1 @12, 18.5 @15 (×biome difficulty,
   ×pressure hp). Endless multiplies by `1 + endlessTime/240`. (Sprint 1 was 5.4 @15 — strong builds out-scaled it.)
-- `damageScale(m) = 1 + 0.04m + 0.08·max(0, m − 6)` → 1.2 @5, 1.48 @8, 1.72 @10, 2.32 @15 (Sprint 1: 1.275 @5,
-  1.825 @15). During the boss fight (t ≥ 15:00, not endless) the multiplier is capped at `BOSS_DAMAGE_CAP = 1.3`
+- `damageScale(m) = 1 + 0.04m + LATE_DMG·max(0, m − LATE_DMG_FROM)`, `LATE_DMG_FROM = 6`. **Sprint 3: `LATE_DMG`
+  0.08 → 0.11** → 1.2 @5, 1.54 @8, 1.84 @10, 2.59 @15 (Sprint 2: 1.48 @8, 2.32 @15; Sprint 1: 1.275 @5, 1.825 @15). Reason:
+  the per-enemy contact cooldown (`CONTACT_COOLDOWN = 0.8 s`, Enemies.ts) cut melee damage taken; without the bump the
+  fresh-save sim mean rose from 11:17 to 12:26 with 2/8 first-run wins (balance-report § Sprint 3). During the boss fight (t ≥ 15:00, not endless) the multiplier is capped at `BOSS_DAMAGE_CAP = 1.3`
   (×difficulty) — Stag contact 30 → 39 instead of 55+.
 - Speed `1 + min(0.25, 0.02m)`.
 - **Adaptive pressure** (from 6:00, `PRESSURE_FROM = 360`): `fill = alive / phase.maxAlive`, `light = lightValue / maxLight`.
@@ -61,4 +63,21 @@ Telegraphs use `fx.telegraph(x,z,r,dur,color)` when the VFX layer provides it, o
 
 ## Endless night
 After the boss: choose **Greet the Dawn** (end, victory) or **Endless Night** (victory locked in; spawn rate grows +1×/5 min,
-enemy hp ×(1 + t/4 min), a boss returns every 3:00 cycling all three at +60% hp each, elites every 60 s, +12 Ash/min).
+enemy hp ×(1 + t/4 min), a boss returns every 3:00 — **the night's own master first, then the other masters in `BIOMES` order, cycling**
+(`endlessBossId(biome.bossId, n)`, Sprint 3; before, Pines' first return was the Mire Mother) — at +60% hp each, elites every 60 s, +12 Ash/min).
+
+## Victory outro (Sprint 3)
+- When a live master dies (`boss:killed` while `enemies.boss` is set; not in the endless night) the run keeps
+  simulating for `BOSS_OUTRO_TIME = 1.3` s of game time (≥ the 1.2 s collapse, `BOSS_DEATH_TIME`). The first
+  `BOSS_SLOWMO_TIME = 0.6` s of real time play at `BOSS_SLOWMO = 0.35`× speed. During the outro no level-up and no dawn
+  choice opens; queued ones open as soon as it ends (level-ups first, then the dawn). The dawn choice still needs its
+  2.2 s real-time delay too, so the screen opens at max(2.2 s real, outro end). Constants: `src/game/Game.ts`.
+- Edge cases: pausing during the outro freezes it (game time does not advance), so the collapse is never cut by a
+  pause; dying during the outro still counts as victory (`run.victory` is set at the kill); a synthetic `boss:killed`
+  with no boss on the field (tests, tools) has no outro.
+
+## World announcements (Sprint 3, BUG-QA-019)
+Director / Game banners ('The master of this night stirs…', 'An elite approaches…', 'The dark closes in!',
+'Cinders on the wind!', 'The master of this night has come.', '… is enraged!', 'Your lantern flares!') go through
+`UI.announce(text, kind)` (one banner at a time under the dawn bar, queued, boss first), feature-detected; contexts
+without a UI (headless sim, tests) fall back to the Fx 'ft-big' banner. Kinds: elite / danger / boss / buff.

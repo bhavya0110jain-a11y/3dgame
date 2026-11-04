@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ATLAS_GLSL, getAtlas } from './atlas';
+import { FOCUS_GLSL, FOCUS_UNIFORM } from './focus';
 
 /**
  * Immediate-mode instanced billboards (one draw call per instance of this class): owners call begin(),
@@ -11,6 +12,7 @@ import { ATLAS_GLSL, getAtlas } from './atlas';
  *             (level-up pillar, pickup beacons, boss death pillar)
  *
  * Premultiplied blending with per-instance additive amount, like ParticleSystem.
+ * With `focus` on, every instance dims near the bearer (vfx/focus) unless it is added with `noFocus`.
  */
 const tmpC = new THREE.Color();
 
@@ -21,10 +23,15 @@ export class Billboards {
   private aPar: THREE.InstancedBufferAttribute;
   private n = 0;
   readonly mesh: THREE.Mesh;
-  readonly uniforms = { uAtlas: { value: null as THREE.Texture | null }, uTime: { value: 0 } };
+  readonly uniforms = {
+    uAtlas: { value: null as THREE.Texture | null },
+    uTime: { value: 0 },
+    uFocus: { value: new THREE.Vector4(1e9, 1e9, 1, 0) },
+  };
 
-  constructor(scene: THREE.Scene, private capacity = 1024, renderOrder = 21) {
+  constructor(scene: THREE.Scene, private capacity = 1024, renderOrder = 21, focus = false) {
     this.uniforms.uAtlas.value = getAtlas();
+    if (focus) this.uniforms.uFocus = FOCUS_UNIFORM;
     const geo = new THREE.InstancedBufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
     geo.setIndex([0, 1, 2, 0, 2, 3]);
@@ -48,11 +55,15 @@ export class Billboards {
         varying vec4 vCol;
         varying float vAdd;
         varying float vMode;
+        varying vec3 vW;
         ${ATLAS_GLSL}
         void main() {
           vec2 corner = position.xy;
           vCol = iCol;
-          vAdd = iPar.w;
+          // iPar.w = additive (0..1), +2 = exempt from focus protection
+          float noFocus = step(1.5, iPar.w);
+          vAdd = iPar.w - 2.0 * noFocus;
+          vW = vec3(iPos.xz, noFocus);
           vQ = corner + 0.5;
           if (iPar.x < -0.5) {
             vMode = 1.0;
@@ -68,6 +79,7 @@ export class Billboards {
           float r = iPar.y;
           vec2 c = vec2(corner.x * cos(r) - corner.y * sin(r), corner.x * sin(r) + corner.y * cos(r)) * iPos.w;
           if (iPar.z > 0.5) {
+            vW.xy += c;
             gl_Position = projectionMatrix * viewMatrix * vec4(iPos.x + c.x, iPos.y, iPos.z + c.y, 1.0);
             return;
           }
@@ -84,6 +96,8 @@ export class Billboards {
         varying vec4 vCol;
         varying float vAdd;
         varying float vMode;
+        varying vec3 vW;
+        ${FOCUS_GLSL}
         void main() {
           float a;
           vec3 tint = vec3(1.0);
@@ -100,7 +114,7 @@ export class Billboards {
             a = t.a;
             tint = t.rgb;
           }
-          a *= vCol.a;
+          a *= vCol.a * (vW.z > 0.5 ? 1.0 : focusK(vW.xy));
           if (a < 0.003) discard;
           gl_FragColor = vec4(vCol.rgb * tint * a, a * (1.0 - vAdd));
         }
@@ -127,32 +141,32 @@ export class Billboards {
   }
 
   /** Camera-facing atlas sprite. Colour sRGB hex × intensity; additive 1 = glow, 0 = alpha. */
-  add(x: number, y: number, z: number, size: number, frame: number, color: number, intensity: number, alpha = 1, rot = 0, additive = 1): void {
+  add(x: number, y: number, z: number, size: number, frame: number, color: number, intensity: number, alpha = 1, rot = 0, additive = 1, noFocus = false): void {
     if (this.n >= this.capacity) return;
     const j = this.n++ * 4;
     tmpC.setHex(color);
     const P = this.aPos.array as Float32Array, C = this.aCol.array as Float32Array, Q = this.aPar.array as Float32Array;
     P[j] = x; P[j + 1] = y; P[j + 2] = z; P[j + 3] = size;
     C[j] = tmpC.r * intensity; C[j + 1] = tmpC.g * intensity; C[j + 2] = tmpC.b * intensity; C[j + 3] = alpha;
-    Q[j] = frame; Q[j + 1] = rot; Q[j + 2] = 0; Q[j + 3] = additive;
+    Q[j] = frame; Q[j + 1] = rot; Q[j + 2] = 0; Q[j + 3] = additive + (noFocus ? 2 : 0);
   }
 
   /** Atlas sprite lying flat on the ground plane at height y (rings, sigils under pickups). */
-  ground(x: number, y: number, z: number, size: number, frame: number, color: number, intensity: number, alpha = 1, rot = 0): void {
+  ground(x: number, y: number, z: number, size: number, frame: number, color: number, intensity: number, alpha = 1, rot = 0, noFocus = false): void {
     if (this.n >= this.capacity) return;
-    this.add(x, y, z, size, frame, color, intensity, alpha, rot, 1);
+    this.add(x, y, z, size, frame, color, intensity, alpha, rot, 1, noFocus);
     (this.aPar.array as Float32Array)[(this.n - 1) * 4 + 2] = 1;
   }
 
   /** Vertical light shaft standing on (x, y, z). */
-  column(x: number, y: number, z: number, width: number, height: number, color: number, intensity: number, alpha = 1): void {
+  column(x: number, y: number, z: number, width: number, height: number, color: number, intensity: number, alpha = 1, noFocus = false): void {
     if (this.n >= this.capacity) return;
     const j = this.n++ * 4;
     tmpC.setHex(color);
     const P = this.aPos.array as Float32Array, C = this.aCol.array as Float32Array, Q = this.aPar.array as Float32Array;
     P[j] = x; P[j + 1] = y; P[j + 2] = z; P[j + 3] = width;
     C[j] = tmpC.r * intensity; C[j + 1] = tmpC.g * intensity; C[j + 2] = tmpC.b * intensity; C[j + 3] = alpha;
-    Q[j] = -1; Q[j + 1] = 0; Q[j + 2] = height; Q[j + 3] = 1;
+    Q[j] = -1; Q[j + 1] = 0; Q[j + 2] = height; Q[j + 3] = 1 + (noFocus ? 2 : 0);
   }
 
   end(): void {

@@ -5,6 +5,8 @@ const PAD_CODES: readonly string[] = Array.from({ length: 24 }, (_, i) => `Pad${
 export class Input {
   readonly keys = new Set<string>();
   private pressedThisFrame = new Set<string>();
+  /** Codes pressed this frame while Shift was held at keydown time (BUG-QA-017: Shift+digit banish). */
+  private shiftedThisFrame = new Set<string>();
   moveX = 0;
   moveZ = 0;
   private touchId: number | null = null;
@@ -17,18 +19,29 @@ export class Input {
   usingTouch = false;
 
   constructor(private target: HTMLElement) {
-    window.addEventListener('keydown', (e) => {
-      if (!this.keys.has(e.code)) this.pressedThisFrame.add(e.code);
-      this.keys.add(e.code);
-      this.usingGamepad = false;
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
-    });
+    window.addEventListener('keydown', (e) => this.onKeyDown(e));
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
     target.addEventListener('touchstart', (e) => this.onTouchStart(e), { passive: false });
     target.addEventListener('touchmove', (e) => this.onTouchMove(e), { passive: false });
     target.addEventListener('touchend', (e) => this.onTouchEnd(e));
     target.addEventListener('touchcancel', (e) => this.onTouchEnd(e));
+  }
+
+  /** keydown handler (public for tests): records the press and whether Shift was held at that moment. */
+  onKeyDown(e: Pick<KeyboardEvent, 'code' | 'shiftKey' | 'preventDefault'>): void {
+    if (!this.keys.has(e.code)) {
+      this.pressedThisFrame.add(e.code);
+      if (e.shiftKey || this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) this.shiftedThisFrame.add(e.code);
+    }
+    this.keys.add(e.code);
+    this.usingGamepad = false;
+    if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'Space') e.preventDefault();
+  }
+
+  /** Was this code pressed since last endFrame() with Shift held at the moment of the press? */
+  pressedWithShift(code: string): boolean {
+    return this.shiftedThisFrame.has(code);
   }
 
   private ensureStick(): void {
@@ -157,5 +170,6 @@ export class Input {
 
   endFrame(): void {
     this.pressedThisFrame.clear();
+    this.shiftedThisFrame.clear();
   }
 }

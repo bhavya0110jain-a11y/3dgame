@@ -21,6 +21,8 @@ const FIELD_PARS = /* glsl */ `
   uniform float uGMode;
   uniform float uWaterLevel;
   uniform vec3 uFlowerA; uniform vec3 uFlowerB; uniform vec3 uFlowerC;
+  uniform vec3 uGBase; uniform vec3 uGPatch; uniform vec3 uGDark; uniform vec3 uGFeature;
+  varying vec3 vGroundCol;
   varying float vGrassT;
   varying vec3 vGrassCol;
   varying float vGrassPatch;
@@ -79,14 +81,44 @@ function fieldVertex(flower: boolean): string {
        vHead = 0.0;
        vGrassT = t;`}
   vGrassPatch = gm.r * 0.6 + clump * 0.4 + (fract(r2 * 3.7) - 0.5) * 0.3;
+  // the ground colour under this blade (same recipe as Ground.ts GROUND_COLOR): blade roots melt into the ground,
+  // so the top-down camera sees soft fur instead of a dark stroke per blade ("TV static", art review s2 #11)
+  {
+    float gpn = gm.r + (wNoise(root * 0.7) - 0.5) * 0.25;
+    vec3 gc = mix(uGDark, uGBase, smoothstep(0.18, 0.5, gpn));
+    gc = mix(gc, uGPatch, smoothstep(0.58, 0.9, gpn + (wNoise(root * 2.3) - 0.5) * 0.2));
+    gc *= 0.86 + 0.22 * gm.a;
+    if (uGMode < 0.5) gc = mix(gc, uGFeature, (1.0 - smoothstep(4.0, 11.0, length(root))) * 0.3);
+    vGroundCol = gc;
+  }
   objectNormal = normalize(vec3(face.x * 0.3, 1.0, face.y * 0.3));
 `;
 }
 
 const FIELD_COLOR = /* glsl */ `
   vec3 gTipC = mix(uGrassTip, uGrassTip2, smoothstep(0.35, 0.8, vGrassPatch));
-  vec3 bladeC = mix(uGrassRoot, gTipC, smoothstep(0.0, 1.0, vGrassT));
-  diffuseColor.rgb = mix(bladeC * vGrassCol.r, vGrassCol, step(0.5, vHead));
+  // root = ground colour; tip ~25-30% lighter, leaning towards the night's tip tone
+  vec3 gTip = mix(vGroundCol * 1.28, gTipC, 0.35);
+  vec3 bladeC = mix(vGroundCol, gTip, smoothstep(0.0, 1.0, vGrassT)) * mix(1.0, vGrassCol.r, vGrassT);
+  diffuseColor.rgb = mix(bladeC, vGrassCol, step(0.5, vHead));
+`;
+
+/**
+ * Menu close-up (art review s2 #11): blades right in front of the lens are lit hard by the lantern and pushed to
+ * gold by the pool shading, so they read as flat straw triangles competing with the CTA. After all shading, the
+ * lower 60% of those blades is darkened (x0.55) and the rest is cooled towards a dimmer moon-sheen of the same
+ * luminance. Gameplay never gets this close (camera ~21 m away), so only the menu shot changes.
+ */
+const NEAR_LENS = /* glsl */ `
+  {
+    float gNear = 1.0 - smoothstep(3.0, 8.5, length(vGWorld - cameraPosition));
+    if (gNear > 0.0 && vHead < 0.5) {
+      float lum = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+      vec3 sheen = lum * vec3(0.62, 0.78, 1.05);
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, sheen, gNear * 0.55);
+      gl_FragColor.rgb *= 1.0 - gNear * (0.25 + 0.45 * (1.0 - smoothstep(0.35, 0.65, vGrassT)));
+    }
+  }
 `;
 
 function bladeGeometry(): THREE.BufferGeometry {
@@ -163,6 +195,10 @@ export class Grass {
     uFlowerA: { value: new THREE.Color() },
     uFlowerB: { value: new THREE.Color() },
     uFlowerC: { value: new THREE.Color() },
+    uGBase: { value: new THREE.Color() },
+    uGPatch: { value: new THREE.Color() },
+    uGDark: { value: new THREE.Color() },
+    uGFeature: { value: new THREE.Color() },
   };
   private flowerUniforms = { ...this.uniforms, uGrassH: { value: 0.4 }, uDensity: { value: 1 } };
   private blades: THREE.Mesh;
@@ -197,9 +233,10 @@ export class Grass {
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
-          '#include <common>\nuniform vec3 uGrassRoot; uniform vec3 uGrassTip; uniform vec3 uGrassTip2;\nvarying float vGrassT; varying vec3 vGrassCol; varying float vGrassPatch; varying float vHead;',
+          '#include <common>\nuniform vec3 uGrassRoot; uniform vec3 uGrassTip; uniform vec3 uGrassTip2;\nvarying vec3 vGroundCol; varying float vGrassT; varying vec3 vGrassCol; varying float vGrassPatch; varying float vHead;',
         )
         .replace('#include <color_fragment>', `#include <color_fragment>\n${FIELD_COLOR}`)
+        .replace('#include <opaque_fragment>', `#include <opaque_fragment>\n${NEAR_LENS}`)
         .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nnormal = normalize(vNormal);')
         .replace(
           '#include <emissivemap_fragment>',
@@ -230,6 +267,10 @@ export class Grass {
     u.uGMode.value = b.ground.mode;
     u.uWaterLevel.value = b.ground.waterLevel;
     u.uGrassRoot.value.setHex(g.root);
+    u.uGBase.value.setHex(b.ground.base);
+    u.uGPatch.value.setHex(b.ground.patch);
+    u.uGDark.value.setHex(b.ground.dark);
+    u.uGFeature.value.setHex(b.ground.feature);
     u.uGrassTip.value.setHex(g.tip);
     // second tip tone: a pale moonlit sheen (keeps tips brighter than the ground); a yellow lerp here read as lime
     // under the amber lantern. Warmth comes from the lantern alone (light-is-life).

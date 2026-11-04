@@ -115,3 +115,31 @@ describe('Input pressed-this-frame (BUG-QA-008 fixed-arity anyPressed)', () => {
     }
   });
 });
+
+describe('Input Shift+digit (BUG-QA-017)', () => {
+  const key = (code: string, shiftKey: boolean) => ({ code, shiftKey, preventDefault: noop });
+
+  it('shiftDigitTap_releasedBeforeFrame_stillReportsShifted', () => {
+    // Arrange
+    const input = new Input({ addEventListener: noop } as unknown as HTMLElement);
+    // Act: Shift+1 pressed and both released before the frame runs
+    input.onKeyDown(key('ShiftLeft', true));
+    input.onKeyDown(key('Digit1', true));
+    input.keys.clear();
+    // Assert
+    expect(input.pressed('Digit1')).toBe(true);
+    expect(input.pressedWithShift('Digit1')).toBe(true);
+  });
+
+  it('plainDigit_noShift_notShiftedAndClearedAtEndFrame', () => {
+    const input = new Input({ addEventListener: noop } as unknown as HTMLElement);
+    input.onKeyDown(key('Digit2', false));
+    expect(input.pressedWithShift('Digit2')).toBe(false);
+    input.onKeyDown(key('ShiftRight', true));
+    input.keys.delete('Digit2');
+    input.onKeyDown(key('Digit2', true));
+    expect(input.pressedWithShift('Digit2')).toBe(true);
+    input.endFrame();
+    expect(input.pressedWithShift('Digit2')).toBe(false);
+  });
+});

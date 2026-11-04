@@ -75,12 +75,42 @@ export function hpScale(minutes: number): number {
 export const LATE_HP = 2.5;
 /** Minute the late HP ramp starts. */
 export const LATE_FROM = 7;
-/** Contact/projectile damage multiplier at minute m: gentle until 6:00 (first-run survival), steeper afterwards. */
+/**
+ * Contact/projectile damage multiplier at minute m: gentle until LATE_DMG_FROM (first-run survival), steeper afterwards.
+ * Sprint 3: LATE_DMG 0.08 → 0.11 to win back the damage the per-enemy contact cooldown (Enemies CONTACT_COOLDOWN 0.8 s)
+ * removed (production/qa/balance-report.md § Sprint 3).
+ */
 export function damageScale(minutes: number): number {
-  return 1 + minutes * 0.04 + Math.max(0, minutes - 6) * 0.08;
+  return 1 + minutes * 0.04 + Math.max(0, minutes - LATE_DMG_FROM) * LATE_DMG;
 }
+/** Minute the steeper damage slope starts, and its extra multiplier per minute. */
+export const LATE_DMG_FROM = 6;
+export const LATE_DMG = 0.11;
 /** Extra enemy HP per point of adaptive pressure above 1 (so pressure is not pure XP for strong builds). */
 export const PRESSURE_HP = 0.5;
+
+/** Minimal UI surface the Director may use for world banners (feature-detected; tests/sim contexts have none). */
+interface Announcer { announce?: (text: string, kind?: string) => void }
+
+/**
+ * Routes a world announcement through the UI banner queue (UI.announce: one at a time, under the dawn bar, never
+ * over the bearer — BUG-QA-019 / art review #9). Falls back to the Fx 'ft-big' banner when no UI is attached.
+ */
+export function announce(ctx: GameContext, text: string, kind: 'info' | 'elite' | 'boss' | 'danger' | 'buff'): void {
+  const ui = (ctx as GameContext & { ui?: Announcer }).ui;
+  if (ui && typeof ui.announce === 'function') ui.announce(text, kind);
+  else ctx.fx.text(ctx.player.x, 3.5, ctx.player.z, text, 'ft-big');
+}
+
+/**
+ * Endless night: the n-th returning master (n ≥ 1). The first is the night's own master (biome.bossId), then the
+ * other biomes' masters in BIOMES order, cycling.
+ */
+export function endlessBossId(biomeBossId: string, n: number): string {
+  const bosses = BIOMES.map((b) => b.bossId);
+  const start = Math.max(0, bosses.indexOf(biomeBossId));
+  return bosses[(start + Math.max(0, n - 1)) % bosses.length] ?? biomeBossId;
+}
 
 export class Director {
   private acc = 0;
@@ -147,7 +177,7 @@ export class Director {
 
     if (!this.warned && t >= RUN_LENGTH - 20) {
       this.warned = true;
-      ctx.fx.text(ctx.player.x, 3.5, ctx.player.z, 'The master of this night stirs…', 'ft-big');
+      announce(ctx, 'The master of this night stirs…', 'boss');
       ctx.events.emit('boss:warning', {});
     }
 
@@ -255,8 +285,7 @@ export class Director {
     if (run.endlessTime >= this.nextEndlessBoss && !ctx.enemies.boss) {
       this.nextEndlessBoss = run.endlessTime + ENDLESS_BOSS_EVERY;
       this.endlessBosses++;
-      const bosses = BIOMES.map((b) => b.bossId);
-      const id = bosses[this.endlessBosses % bosses.length];
+      const id = endlessBossId(ctx.world.biome.bossId, this.endlessBosses);
       this.spawnBoss(ctx, id, 1 + this.endlessBosses * 0.6);
     }
     if (run.elapsed >= this.nextElite) {
@@ -273,7 +302,7 @@ export class Director {
     const id = ctx.run.elapsed < 120 ? (this.allowed.has('bog_lurker') ? 'bog_lurker' : 'stalker') : ctx.rng.pick(candidates.length ? candidates : ['brute']);
     const e = this.spawnAtEdge(ctx, id, true);
     if (e) {
-      ctx.fx.text(ctx.player.x, 3.5, ctx.player.z, 'An elite approaches…', 'ft-big');
+      announce(ctx, 'An elite approaches…', 'elite');
       ctx.events.emit('elite:spawned', { defId: id, x: e.x, z: e.z });
     }
   }
@@ -295,7 +324,7 @@ export class Director {
       const a = (i / n) * Math.PI * 2;
       ctx.enemies.spawn(id, p.x + Math.cos(a) * 16, p.z + Math.sin(a) * 16);
     }
-    ctx.fx.text(p.x, 3.5, p.z, 'The dark closes in!', 'ft-big');
+    announce(ctx, 'The dark closes in!', 'danger');
   }
 
   /** A tight pack charging in from one side — readable, dodgeable, and great for chain reactions. */
@@ -307,7 +336,7 @@ export class Director {
     for (let i = 0; i < n; i++) {
       ctx.enemies.spawn(id, cx + ctx.rng.range(-2.5, 2.5), cz + ctx.rng.range(-2.5, 2.5));
     }
-    ctx.fx.text(p.x, 3.5, p.z, 'Cinders on the wind!', 'ft-big');
+    announce(ctx, 'Cinders on the wind!', 'danger');
   }
 
   private spawnBoss(ctx: GameContext, id: string, hpMul: number): void {

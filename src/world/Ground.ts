@@ -58,19 +58,21 @@ const GROUND_COLOR = /* glsl */ `
     gcol = mix(gcol, uGPath * (0.8 + 0.3 * n2), smoothstep(0.3, 0.75, pathRaw));
     gcol = mix(gcol, gcol * 0.55 + uGDark * 0.25, shore);
     float depth = smoothstep(uWaterLevel, uWaterLevel + 0.12, wet);
-    vec3 water = mix(uGAccent * 0.75, uGFeature, depth);
+    // water stays darker than the lantern pool (value hierarchy, art review s2 #7): deep, still and dark-teal
+    vec3 water = mix(uGAccent * 0.42, uGFeature * 0.62, depth);
     // ripples
     vec2 rp = gp * 1.6 + vec2(uTime * 0.35, uTime * 0.21);
     float e = 0.08;
     float r0 = wNoise(rp) + 0.5 * wNoise(rp * 2.7 - uTime * 0.4);
     float rx = wNoise(rp + vec2(e, 0.0)) + 0.5 * wNoise((rp + vec2(e, 0.0)) * 2.7 - uTime * 0.4);
     float rz = wNoise(rp + vec2(0.0, e)) + 0.5 * wNoise((rp + vec2(0.0, e)) * 2.7 - uTime * 0.4);
-    gNrm = vec3(r0 - rx, 0.0, r0 - rz) * 2.2 * gWater;
+    gNrm = vec3(r0 - rx, 0.0, r0 - rz) * 0.8 * gWater;
     gcol = mix(gcol, water, gWater);
-    gRough = mix(gRough, 0.12, gWater);
+    gRough = mix(gRough, 0.16, gWater);
     // fake sky reflection + moon glints + bioluminescent algae at the pool edges
-    float glint = pow(wNoise(gp * 3.0 + vec2(uTime * 0.5, -uTime * 0.3)) * wNoise(gp * 4.3 - uTime * 0.4), 12.0);
-    gEmit += gWater * (uGAccent * (0.04 + 0.05 * (1.0 - depth)) + vec3(0.55, 0.8, 1.0) * glint * 0.22);
+    // sparse moon glints (low frequency, ~0.3x the old density) instead of a fine glitter
+    float glint = pow(wNoise(gp * 1.4 + vec2(uTime * 0.3, -uTime * 0.2)) * wNoise(gp * 2.1 - uTime * 0.25), 16.0);
+    gEmit += gWater * (uGAccent * (0.03 + 0.03 * (1.0 - depth)) + vec3(0.55, 0.8, 1.0) * glint * 0.13);
     vec2 ac = floor(gp * 1.6);
     vec2 ao = fract(gp * 1.6) - 0.5 - (vec2(wHash(ac + 2.3), wHash(ac + 6.1)) - 0.5) * 0.6;
     float algae = step(0.82, wHash(ac)) * (1.0 - smoothstep(0.02, 0.1, length(ao)))
@@ -106,7 +108,7 @@ const GROUND_COLOR = /* glsl */ `
       gcol = mix(gcol, tile, stoneMask);
       // ember glow in a few cracks / joints, breathing slowly
       float ember = crack * step(0.86, h) * stoneMask * (1.0 - missing);
-      gEmit += uGAccent * ember * (0.35 + 0.25 * sin(uTime * 1.7 + h * 20.0));
+      gEmit += uGAccent * ember * (0.2 + 0.14 * sin(uTime * 1.7 + h * 20.0));
       gNrm = vec3(f.x - 0.5, 0.0, f.y - 0.5) * mortar * 0.6 * stoneMask;
       gRough = mix(gRough, 0.75, stoneMask);
     }
@@ -146,6 +148,9 @@ export class Ground {
           '#include <normal_fragment_maps>',
           '#include <normal_fragment_maps>\nnormal = normalize(normal + (viewMatrix * vec4(gNrm, 0.0)).xyz);',
         )
+        // the moon sits almost exactly in the gameplay camera's mirror direction: damp the water's direct specular so
+        // the pools read as dark still water with a few glints, not a sheet of glitter brighter than the lantern pool
+        .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directSpecular *= 1.0 - 0.88 * gWater;')
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += gEmit;');
     };
     this.material.customProgramCacheKey = () => 'll-ground';

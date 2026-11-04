@@ -6,14 +6,14 @@ import { tintMultiplier } from '../src/render/post/GradeShader';
 import { applyRim, applyToonRamp, setRim } from '../src/render/materials';
 
 describe('CameraRig', () => {
-  it('follow_idlePlayer_settlesOnPlayerAtDefaultZoomWithoutNaN', () => {
+  it('follow_idlePlayer_settlesOnPlayerAtCalmZoomWithoutNaN', () => {
     const cam = new THREE.PerspectiveCamera(45, 16 / 9, 0.1, 200);
     const rig = new CameraRig(cam);
     rig.menu(0.016, 0, 0);
     for (let i = 0; i < 600; i++) rig.follow(1 / 60, 5, -3, 0, 0, 0, 0, NaN, NaN);
     expect(rig.focus.x).toBeCloseTo(5, 2);
     expect(rig.focus.z).toBeCloseTo(-3, 2);
-    expect(rig.zoom).toBeCloseTo(1, 2);
+    expect(rig.zoom).toBeCloseTo(0.9, 2); // empty field: 10% closer (bearer presence, art review s2 P2)
     expect(Number.isFinite(cam.position.x + cam.position.y + cam.position.z)).toBe(true);
     expect(cam.position.y).toBeGreaterThan(10);
   });
@@ -26,6 +26,27 @@ describe('CameraRig', () => {
     expect(rig.zoom).toBeLessThanOrEqual(1.3001);
     expect(rig.focus.x).toBeGreaterThan(1); // look-ahead towards +x
     expect(rig.focus.x).toBeLessThanOrEqual(2.41);
+  });
+
+  it('follow_bossWithin14m_biasesFocusTowardBossAndZoomsOut', () => {
+    const cam = new THREE.PerspectiveCamera();
+    const near = new CameraRig(cam);
+    for (let i = 0; i < 1200; i++) near.follow(1 / 60, 0, 0, 0, 0, 0, 0, 0, -10);
+    expect(near.focus.z).toBeCloseTo(-4, 1); // 40% of the 10 m offset
+    expect(near.zoom).toBeCloseTo(1.008, 2); // +12% zoom-out
+    const far = new CameraRig(new THREE.PerspectiveCamera());
+    for (let i = 0; i < 1200; i++) far.follow(1 / 60, 0, 0, 0, 0, 0, 0, 0, -30);
+    expect(far.focus.z).toBeCloseTo(0, 2); // a distant boss leaves the framing alone
+    expect(far.zoom).toBeCloseTo(0.9, 2);
+  });
+
+  it('menu_portrait_framesBearerNearCentre', () => {
+    const cam = new THREE.PerspectiveCamera(62, 390 / 844, 0.1, 200);
+    const rig = new CameraRig(cam);
+    rig.menu(0.016, 0, 0);
+    const p = new THREE.Vector3(0, 1.0, 0).project(cam);
+    expect(Math.abs(p.x)).toBeLessThan(0.3); // bearer near the horizontal centre (NDC)
+    expect(p.y).toBeLessThan(0.1); // and at or below the middle (menu title above)
   });
 
   it('follow_fullTrauma_shakeStaysBounded', () => {

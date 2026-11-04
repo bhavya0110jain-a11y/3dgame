@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FOCUS_GLSL, FOCUS_UNIFORM } from './focus';
 
 /**
  * Analytic ground decals, one instanced draw call: shockwave rings, light splashes, telegraphs, rune circles.
@@ -18,6 +19,8 @@ export const GM_TELEGRAPH = 2;
 export const GM_RUNE = 3;
 
 export const GF_UNSCALED = 1;
+/** Exempt from focus protection (telegraphs are always exempt: danger must read). */
+export const GF_NOFOCUS = 2;
 
 const X = 0, Y = 1, Z = 2, R0 = 3, R1 = 4, AGE = 5, LIFE = 6, CR = 7, CG = 8, CB = 9, INT = 10, MODE = 11, TH = 12, FLAGS = 13, SEED = 14;
 const F = 15;
@@ -36,6 +39,8 @@ export class GroundFx {
   gain = 1;
   /** Telegraph end-of-fill flash multiplier (1 with reduced flashing). */
   flashEnd = 1.6;
+  /** Additive light of the non-telegraph decals last update (≈ intensity × alpha × lit area, pre-gain). */
+  energy = 0;
 
   constructor(scene: THREE.Scene, private capacity = 160) {
     this.d = new Float32Array(capacity * F);
@@ -53,7 +58,7 @@ export class GroundFx {
     geo.instanceCount = 0;
     this.geo = geo;
     this.mat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 } },
+      uniforms: { uTime: { value: 0 }, uFocus: FOCUS_UNIFORM },
       vertexShader: /* glsl */ `
         attribute vec4 iA;
         attribute vec4 iB;
@@ -61,11 +66,13 @@ export class GroundFx {
         varying vec2 vUv;
         varying vec4 vB;
         varying vec4 vC;
+        varying vec2 vW;
         void main() {
           vUv = position.xz;
           vB = iB;
           vC = iC;
           vec3 p = vec3(iA.x + position.x * iA.w, iA.y, iA.z + position.z * iA.w);
+          vW = p.xz;
           gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
         }
       `,
@@ -74,10 +81,14 @@ export class GroundFx {
         varying vec2 vUv;
         varying vec4 vB;
         varying vec4 vC;
+        varying vec2 vW;
+        ${FOCUS_GLSL}
         float band(float d, float c, float w) { float x = (d - c) / max(w, 0.002); return exp(-x * x * 2.0); }
         void main() {
           float d = length(vUv);
-          float mode = vC.x;
+          // mode + 4 = exempt from focus protection
+          float noFocus = step(3.5, vC.x);
+          float mode = vC.x - 4.0 * noFocus;
           float th = vC.y;
           float p = vC.z;
           float v = 0.0;
@@ -108,7 +119,8 @@ export class GroundFx {
             v = r1 + r2 + ticks * 0.7 + arcs * 0.9 + exp(-d * d * 5.0) * 0.3;
           }
           float a = vB.a;
-          gl_FragColor = vec4(vB.rgb * v * a, dark * a);
+          float fk = (noFocus > 0.5 || (mode > 1.5 && mode < 2.5)) ? 1.0 : focusK(vW);
+          gl_FragColor = vec4(vB.rgb * v * a * fk, dark * a);
         }
       `,
       transparent: true,
@@ -159,6 +171,7 @@ export class GroundFx {
     const A = this.aA.array as Float32Array;
     const B = this.aB.array as Float32Array;
     const C = this.aC.array as Float32Array;
+    let energy = 0;
     let i = 0;
     while (i < this.count) {
       const o = i * F;
@@ -186,11 +199,18 @@ export class GroundFx {
       }
       if (age < 0) alpha = 0;
       const inten = d[o + INT] * (mode === GM_TELEGRAPH ? 1 : this.gain);
+      if (mode !== GM_TELEGRAPH && alpha > 0) {
+        // lit area: gaussian pools light the whole disc, rings only a band ~3 thicknesses wide (+ heat trail)
+        const rr = Math.max(0.01, r);
+        const area = mode === GM_GLOW ? 1.2 * rr * rr : mode === GM_SHOCK ? 6 * rr * d[o + TH] + 0.25 * rr * rr : 8 * rr * d[o + TH] + 0.2 * rr * rr;
+        energy += d[o + INT] * alpha * area;
+      }
       A[j] = d[o + X]; A[j + 1] = d[o + Y]; A[j + 2] = d[o + Z]; A[j + 3] = Math.max(0.01, r);
       B[j] = d[o + CR] * inten; B[j + 1] = d[o + CG] * inten; B[j + 2] = d[o + CB] * inten; B[j + 3] = alpha;
-      C[j] = mode; C[j + 1] = d[o + TH] / Math.max(0.05, r); C[j + 2] = t; C[j + 3] = d[o + SEED];
+      C[j] = mode + (d[o + FLAGS] & GF_NOFOCUS ? 4 : 0); C[j + 1] = d[o + TH] / Math.max(0.05, r); C[j + 2] = t; C[j + 3] = d[o + SEED];
       i++;
     }
+    this.energy = energy;
     this.geo.instanceCount = this.count;
     if (this.count > 0) {
       const n = this.count * 4;

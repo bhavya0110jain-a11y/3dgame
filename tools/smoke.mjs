@@ -31,7 +31,9 @@ const port = server.address().port;
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 // SwiftShader frames can take seconds on a loaded machine; screenshots wait for a frame, so be generous.
-page.setDefaultTimeout(180_000);
+// SMOKE_TIMEOUT_MS raises it further when several agents share the CPU (load average > 20 timed out at 180 s).
+const STEP_TIMEOUT = Number(process.env.SMOKE_TIMEOUT_MS) || 180_000;
+page.setDefaultTimeout(STEP_TIMEOUT);
 /** Waits for 3 rendered frames + a beat so CSS screen-in animations have actually played (SwiftShader can be ~1 fps). */
 const settle = (p = page, ms = 500) =>
   p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => r())))))
@@ -57,11 +59,13 @@ await page.waitForTimeout(1000);
 await page.keyboard.down('KeyD');
 let levelShot = false;
 for (let i = 0; i < 14; i++) {
-  await page.evaluate(() => {
+  await page.evaluate((dir) => {
     const g = window.__game;
-    for (let k = 0; k < 90 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+    // Steer the sim directly: Input.update() only runs on real frames, so on a starved ~0.2 fps SwiftShader the D→W
+    // key switch below never reached the fast-forward, the bearer ran head-on into a rock and died at 0:34 (S3 QA).
+    for (let k = 0; k < 90 && g.state === 'playing'; k++) { g.input.moveX = dir[0]; g.input.moveZ = dir[1]; g.updateRun(1 / 30); g.fx.update(1 / 30); }
     g.renderer.rig.follow(1 / 30, g.player.x, g.player.z, 0, 0, 0, 0, NaN, NaN); g.renderer.rig.snap(g.player.x, g.player.z); // follow() first: snap() alone does not end the menu->run swoop // fast-forward outruns the dt-smoothed camera on ~1 fps SwiftShader
-  });
+  }, i < 7 ? [1, 0] : [0, -1]);
   await page.waitForTimeout(700);
   const state = await page.evaluate(() => window.__game.state);
   if (state === 'levelup') {
@@ -116,7 +120,7 @@ await page.evaluate(() => {
   g.enemies.clear();
   g.enemies.spawn(g.world.biome.bossId, g.player.x, g.player.z - 7);
   // play the 1 s rise-from-the-ground spawn in sim time (SwiftShader frames are too slow to advance it)
-  for (let k = 0; k < 45 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+  for (let k = 0; k < 45 && g.state === 'playing'; k++) { g.updateRun(1 / 30); g.fx.update(1 / 30); } // fx.update: FX age with the sim (else bursts pile up un-aged: S3 QA smoke-07 white blob)
   g.renderer.rig.follow(1 / 30, g.player.x, g.player.z, 0, 0, 0, 0, NaN, NaN); g.renderer.rig.snap(g.player.x, g.player.z); // follow() first: snap() alone does not end the menu->run swoop
   g.renderer.damagePulse = 0;
 });
@@ -177,7 +181,7 @@ if ((await page.evaluate(() => window.__game.state)) !== 'playing') failures.pus
 await page.evaluate(() => {
   const g = window.__game;
   g.player.damage = () => {};
-  for (let k = 0; k < 60 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+  for (let k = 0; k < 60 && g.state === 'playing'; k++) { g.updateRun(1 / 30); g.fx.update(1 / 30); } // fx.update: FX age with the sim (else bursts pile up un-aged: S3 QA smoke-07 white blob)
   g.renderer.rig.follow(1 / 30, g.player.x, g.player.z, 0, 0, 0, 0, NaN, NaN); g.renderer.rig.snap(g.player.x, g.player.z); // follow() first: snap() alone does not end the menu->run swoop
   g.events.emit('boss:killed', { defId: g.world.biome.bossId }); // dawn choice opens 2.2 s (real time) later
 });
@@ -192,7 +196,7 @@ const endless = await page.evaluate(() => ({ state: window.__game.state, endless
 if (endless.state !== 'playing' || !endless.endless) failures.push('dawn: Endless Night did not continue the run ' + JSON.stringify(endless));
 await page.evaluate(() => {
   const g = window.__game;
-  for (let k = 0; k < 90 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+  for (let k = 0; k < 90 && g.state === 'playing'; k++) { g.updateRun(1 / 30); g.fx.update(1 / 30); } // fx.update: FX age with the sim (else bursts pile up un-aged: S3 QA smoke-07 white blob)
   g.renderer.rig.follow(1 / 30, g.player.x, g.player.z, 0, 0, 0, 0, NaN, NaN); g.renderer.rig.snap(g.player.x, g.player.z); // follow() first: snap() alone does not end the menu->run swoop
 });
 await settle();
@@ -211,10 +215,10 @@ if (process.env.SMOKE_TOUCH !== '0') {
   await page.close(); // free the main page's render loop before booting a second game instance
   const tctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
   const tpage = await tctx.newPage();
-  tpage.setDefaultTimeout(180_000);
+  tpage.setDefaultTimeout(STEP_TIMEOUT);
   tpage.on('pageerror', (e) => errors.push('[touch] ' + String(e)));
   await tpage.goto(`http://localhost:${port}/`);
-  await tpage.waitForFunction(() => !!window.__game, null, { timeout: 180_000 });
+  await tpage.waitForFunction(() => !!window.__game, null, { timeout: STEP_TIMEOUT });
   await tpage.waitForSelector('.screen-menu.visible [data-act=play]', { state: 'visible' });
   await settle(tpage);
   await tpage.tap('[data-act=play]');
@@ -233,7 +237,7 @@ if (process.env.SMOKE_TOUCH !== '0') {
   // left the shot on the first frame of the menu -> run camera swoop (00:00, hero framing)
   await tpage.evaluate(() => {
     const g = window.__game;
-    for (let k = 0; k < 90 && g.state === 'playing'; k++) g.updateRun(1 / 30);
+    for (let k = 0; k < 90 && g.state === 'playing'; k++) { g.updateRun(1 / 30); g.fx.update(1 / 30); } // fx.update: FX age with the sim (else bursts pile up un-aged: S3 QA smoke-07 white blob)
     g.renderer.rig.follow(1 / 30, g.player.x, g.player.z, 0, 0, 0, 0, NaN, NaN); g.renderer.rig.snap(g.player.x, g.player.z); // follow() first: snap() alone does not end the menu->run swoop
   });
   await settle(tpage);

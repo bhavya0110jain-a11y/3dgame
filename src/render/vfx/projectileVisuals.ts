@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FOCUS_GLSL, FOCUS_UNIFORM } from './focus';
 
 /**
  * Projectile looks — one instanced billboard draw call for every projectile body/glow plus one instanced crystal
@@ -25,7 +26,7 @@ export function createProjectileBillboards(capacity: number): {
   aDir: THREE.InstancedBufferAttribute;
   aCol: THREE.InstancedBufferAttribute;
   aSty: THREE.InstancedBufferAttribute;
-  uniforms: { uTime: { value: number } };
+  uniforms: { uTime: { value: number }; uGain: { value: number }; uFocus: typeof FOCUS_UNIFORM };
 } {
   const geo = new THREE.InstancedBufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
@@ -40,7 +41,9 @@ export function createProjectileBillboards(capacity: number): {
   geo.setAttribute('iCol', aCol);
   geo.setAttribute('iSty', aSty);
   geo.instanceCount = 0;
-  const uniforms = { uTime: { value: 0 } };
+  // uGain: FxManager brightness governor; uFocus: focus protection. Both only touch the player's shots (hostile
+  // orbs and their markers always draw at full strength — they are threats to read).
+  const uniforms = { uTime: { value: 0 }, uGain: { value: 1 }, uFocus: FOCUS_UNIFORM };
   const mat = new THREE.ShaderMaterial({
     uniforms,
     vertexShader: /* glsl */ `
@@ -52,11 +55,16 @@ export function createProjectileBillboards(capacity: number): {
       varying float vTail;  // tail length in head radii
       varying vec4 vCol;
       varying vec2 vSty;
+      varying vec3 vFoc; // world xz of this vertex (along the flight line) + 1 when focus protection applies
+      uniform float uGain;
       void main() {
         vCol = iCol;
         vSty = iSty.xy;
         float r = iPos.w;
         float style = iSty.x;
+        bool hostile = style > 1.5 && style < 3.5;
+        if (!hostile) vCol.rgb *= uGain;
+        vFoc = vec3(iPos.xz, hostile ? 0.0 : 1.0);
         if (style > 2.5 && style < 3.5) {
           // flat ground marker
           vL = position.xy * 2.0;
@@ -80,6 +88,10 @@ export function createProjectileBillboards(capacity: number): {
         float across = position.y * 2.0 * halfW;
         vL = vec2(along, across) / r;
         vTail = tail / r;
+        // tails reach back toward the bearer: focus is evaluated per fragment along the flight line (world xz)
+        vec2 h = iDir.xz;
+        float hl = length(h);
+        if (hl > 1e-4) vFoc.xy += h / hl * along;
         mv.xy += dir * along + perp * across;
         gl_Position = projectionMatrix * mv;
       }
@@ -90,6 +102,8 @@ export function createProjectileBillboards(capacity: number): {
       varying float vTail;
       varying vec4 vCol;
       varying vec2 vSty;
+      varying vec3 vFoc;
+      ${FOCUS_GLSL}
       void main() {
         float style = vSty.x;
         vec2 L = vL;
@@ -136,7 +150,7 @@ export function createProjectileBillboards(capacity: number): {
           float core = exp(-(L.y * L.y) / (w * w) * 14.0) * smoothstep(1.0, 0.6, tt);
           float head = exp(-r2 * 2.2);
           float pulse = 0.85 + 0.15 * sin(L.x * 1.3 + uTime * 55.0);
-          outc = col * (body * pulse + head * 1.2) + vec3(1.0) * (core + head * 0.8) * 1.6;
+          outc = col * (body * pulse * 0.8 + head * 1.1) + vec3(1.0) * (core * 0.6 + head * 0.7) * min(1.0, length(col));
         } else if (style < 2.5) {
           // VOID orb (hostile)
           float d = sqrt(r2);
@@ -152,8 +166,11 @@ export function createProjectileBillboards(capacity: number): {
           float inner = smoothstep(0.8, 0.45, d);
           // swirl inside the dark core
           float sw = 0.5 + 0.5 * sin(ang * 3.0 - d * 9.0 + uTime * 6.0);
-          outc = col * (rim * 2.0 * pulse + crown * 1.1 + glow + tail) + col * inner * sw * 0.06;
-          occl = inner * 0.92;
+          // dark outer rim: a thin ink ring just outside the glowing rim separates the orb from warm/bright
+          // backgrounds (lantern pool, friendly fire) and from the player's own glowing shots
+          float ink = exp(-pow((d - 1.02) / 0.11, 2.0));
+          outc = col * (rim * 2.0 * pulse + crown * 0.8 * (1.0 - ink) + glow + tail) + col * inner * sw * 0.06;
+          occl = max(inner * 0.92, ink * 0.8);
         } else {
           // MARKER on the ground
           float d = sqrt(r2);
@@ -163,6 +180,11 @@ export function createProjectileBillboards(capacity: number): {
           occl = fill;
         }
         float a = vCol.a;
+        if (vFoc.z > 0.5) {
+          float fk = focusK(vFoc.xy);
+          outc *= fk;
+          occl *= fk;
+        }
         gl_FragColor = vec4(outc * a, occl * a);
       }
     `,

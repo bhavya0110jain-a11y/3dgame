@@ -1,6 +1,6 @@
 {
-  "date": "2026-11-04T14:11:25.020Z",
-  "build": "/tmp/claude-0/-home-user-3dgame/eae0ed48-5b7a-5ab2-8a20-e8c9671eef35/scratchpad/s2-qa-build",
+  "date": "2026-11-04T16:40:17.777Z",
+  "build": "/tmp/claude-0/-home-user-3dgame/eae0ed48-5b7a-5ab2-8a20-e8c9671eef35/scratchpad/s3-qa-build",
   "gl": "swiftshader",
   "viewport": "960x540",
   "budget": {
@@ -12,25 +12,25 @@
   "rows": [
     {
       "count": 100,
-      "renderedFrames": 20,
-      "alive": 99,
-      "frames": 80,
-      "frameMsAvg": 257.37,
-      "frameMsP50": 18.8,
-      "frameMsP95": 1723.2,
-      "simMs": 1.042,
-      "enemiesMs": 0.537,
-      "weaponsMs": 0.285,
-      "projectilesMs": 0.065,
-      "pickupsMs": 0.009,
-      "fxMs": 0.214,
-      "renderMs": 6.52,
-      "drawCalls": 131,
-      "triangles": 960970,
-      "programs": 65,
+      "renderedFrames": 22,
+      "alive": 100,
+      "frames": 90,
+      "frameMsAvg": 1027.71,
+      "frameMsP50": 21.8,
+      "frameMsP95": 5724.4,
+      "simMs": 0.93,
+      "enemiesMs": 0.376,
+      "weaponsMs": 0.258,
+      "projectilesMs": 0.118,
+      "pickupsMs": 0.007,
+      "fxMs": 0.284,
+      "renderMs": 13.2,
+      "drawCalls": 152,
+      "triangles": 819357,
+      "programs": 66,
       "geometries": 112,
       "textures": 27,
-      "heapDeltaKB": -4091,
+      "heapDeltaKB": 370,
       "heapMB": 33,
       "effectiveQuality": "high",
       "weapons": [
@@ -44,27 +44,27 @@
       "topMeshes": [
         {
           "key": "MeshStandardMaterial",
-          "tris": 311638,
+          "tris": 221154,
           "meshes": 13,
-          "instances": 37654
+          "instances": 37537
         },
         {
           "key": "MeshStandardMaterial [shadow]",
-          "tris": 208514,
+          "tris": 210690,
           "meshes": 29,
-          "instances": 99
+          "instances": 100
         },
         {
           "key": "MeshBasicMaterial [shadow]",
-          "tris": 145198,
+          "tris": 79216,
           "meshes": 13,
-          "instances": 133
+          "instances": 85
         },
         {
           "key": "MeshBasicMaterial",
-          "tris": 84232,
+          "tris": 48106,
           "meshes": 35,
-          "instances": 296
+          "instances": 200
         },
         {
           "key": "vfx-strips",
@@ -74,9 +74,9 @@
         },
         {
           "key": "ShaderMaterial",
-          "tris": 3893,
+          "tris": 3801,
           "meshes": 8,
-          "instances": 315
+          "instances": 269
         },
         {
           "key": "Head_1 [shadow]",
@@ -85,124 +85,16 @@
           "instances": 1
         },
         {
-          "key": "vfx-particles",
-          "tris": 1376,
-          "meshes": 1,
-          "instances": 688
-        },
-        {
-          "key": "Body_1 [shadow]",
-          "tris": 1160,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "Body_2 [shadow]",
-          "tris": 1056,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "Body_5 [shadow]",
-          "tris": 576,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "Staff_1",
-          "tris": 560,
-          "meshes": 1,
-          "instances": 1
-        }
-      ],
-      "shadowCasterTris": 360396,
-      "lights": {
-        "point": 3,
-        "pointShadow": 1,
-        "dir": 1,
-        "dirShadow": 1
-      },
-      "quality": "high"
-    },
-    {
-      "count": 200,
-      "renderedFrames": 20,
-      "alive": 199,
-      "frames": 80,
-      "frameMsAvg": 297.48,
-      "frameMsP50": 16.8,
-      "frameMsP95": 2271.4,
-      "simMs": 1.824,
-      "enemiesMs": 1.031,
-      "weaponsMs": 0.404,
-      "projectilesMs": 0.088,
-      "pickupsMs": 0.01,
-      "fxMs": 0.24,
-      "renderMs": 7.47,
-      "drawCalls": 140,
-      "triangles": 798922,
-      "programs": 65,
-      "geometries": 112,
-      "textures": 27,
-      "heapDeltaKB": -4492,
-      "heapMB": 33,
-      "effectiveQuality": "high",
-      "weapons": [
-        "ember_bolt:8",
-        "cinder_halo:8",
-        "spark_chain:8",
-        "brazier:8",
-        "flare_nova:8",
-        "wick_lance:8"
-      ],
-      "topMeshes": [
-        {
-          "key": "MeshStandardMaterial",
-          "tris": 281840,
-          "meshes": 13,
-          "instances": 37627
-        },
-        {
-          "key": "MeshStandardMaterial [shadow]",
-          "tris": 150356,
-          "meshes": 29,
-          "instances": 199
-        },
-        {
-          "key": "MeshBasicMaterial [shadow]",
-          "tris": 107670,
-          "meshes": 13,
-          "instances": 114
-        },
-        {
-          "key": "MeshBasicMaterial",
-          "tris": 72942,
-          "meshes": 35,
-          "instances": 377
-        },
-        {
-          "key": "vfx-strips",
-          "tris": 12000,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "ShaderMaterial",
-          "tris": 3783,
-          "meshes": 8,
-          "instances": 260
-        },
-        {
-          "key": "Head_1 [shadow]",
+          "key": "Head_1",
           "tris": 1712,
           "meshes": 1,
           "instances": 1
         },
         {
           "key": "vfx-particles",
-          "tris": 1584,
+          "tris": 1670,
           "meshes": 1,
-          "instances": 792
+          "instances": 835
         },
         {
           "key": "Body_1 [shadow]",
@@ -211,25 +103,19 @@
           "instances": 1
         },
         {
-          "key": "Body_2 [shadow]",
-          "tris": 1056,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "Body_5 [shadow]",
-          "tris": 576,
+          "key": "Body_1",
+          "tris": 1160,
           "meshes": 1,
           "instances": 1
         },
         {
           "key": "Staff_1",
-          "tris": 560,
-          "meshes": 1,
-          "instances": 1
+          "tris": 1120,
+          "meshes": 2,
+          "instances": 2
         }
       ],
-      "shadowCasterTris": 264710,
+      "shadowCasterTris": 296590,
       "lights": {
         "point": 3,
         "pointShadow": 1,
@@ -240,26 +126,26 @@
     },
     {
       "count": 350,
-      "renderedFrames": 20,
+      "renderedFrames": 22,
       "alive": 348,
-      "frames": 80,
-      "frameMsAvg": 224.86,
-      "frameMsP50": 16.8,
-      "frameMsP95": 1844.2,
-      "simMs": 1.811,
-      "enemiesMs": 1.182,
-      "weaponsMs": 0.375,
-      "projectilesMs": 0.1,
-      "pickupsMs": 0.006,
-      "fxMs": 0.244,
-      "renderMs": 6.25,
-      "drawCalls": 142,
-      "triangles": 1053873,
-      "programs": 65,
+      "frames": 90,
+      "frameMsAvg": 1327.29,
+      "frameMsP50": 18.9,
+      "frameMsP95": 7424.3,
+      "simMs": 4.088,
+      "enemiesMs": 2.94,
+      "weaponsMs": 0.632,
+      "projectilesMs": 0.239,
+      "pickupsMs": 0.007,
+      "fxMs": 0.664,
+      "renderMs": 10.59,
+      "drawCalls": 156,
+      "triangles": 1093088,
+      "programs": 66,
       "geometries": 112,
       "textures": 27,
-      "heapDeltaKB": 1865,
-      "heapMB": 53,
+      "heapDeltaKB": -24018,
+      "heapMB": 33,
       "effectiveQuality": "high",
       "weapons": [
         "ember_bolt:8",
@@ -272,9 +158,9 @@
       "topMeshes": [
         {
           "key": "MeshStandardMaterial",
-          "tris": 306314,
+          "tris": 325440,
           "meshes": 13,
-          "instances": 37630
+          "instances": 37667
         },
         {
           "key": "MeshStandardMaterial [shadow]",
@@ -284,15 +170,15 @@
         },
         {
           "key": "MeshBasicMaterial [shadow]",
-          "tris": 129712,
+          "tris": 131114,
           "meshes": 13,
-          "instances": 117
+          "instances": 124
         },
         {
           "key": "MeshBasicMaterial",
-          "tris": 76900,
+          "tris": 86660,
           "meshes": 35,
-          "instances": 513
+          "instances": 536
         },
         {
           "key": "vfx-strips",
@@ -302,18 +188,24 @@
         },
         {
           "key": "ShaderMaterial",
-          "tris": 3871,
+          "tris": 3809,
           "meshes": 8,
-          "instances": 304
+          "instances": 273
         },
         {
           "key": "vfx-particles",
-          "tris": 2732,
+          "tris": 2190,
           "meshes": 1,
-          "instances": 1366
+          "instances": 1095
         },
         {
           "key": "Head_1 [shadow]",
+          "tris": 1712,
+          "meshes": 1,
+          "instances": 1
+        },
+        {
+          "key": "Head_1",
           "tris": 1712,
           "meshes": 1,
           "instances": 1
@@ -325,25 +217,19 @@
           "instances": 1
         },
         {
-          "key": "Body_2 [shadow]",
-          "tris": 1056,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "Body_5 [shadow]",
-          "tris": 576,
+          "key": "Body_1",
+          "tris": 1160,
           "meshes": 1,
           "instances": 1
         },
         {
           "key": "Staff_1",
-          "tris": 560,
-          "meshes": 1,
-          "instances": 1
+          "tris": 1120,
+          "meshes": 2,
+          "instances": 2
         }
       ],
-      "shadowCasterTris": 399334,
+      "shadowCasterTris": 400736,
       "lights": {
         "point": 3,
         "pointShadow": 1,
@@ -354,26 +240,26 @@
     },
     {
       "count": 100,
-      "renderedFrames": 20,
+      "renderedFrames": 22,
       "alive": 100,
-      "frames": 80,
-      "frameMsAvg": 44.84,
-      "frameMsP50": 16.6,
-      "frameMsP95": 28.7,
-      "simMs": 0.917,
-      "enemiesMs": 0.386,
-      "weaponsMs": 0.221,
-      "projectilesMs": 0.073,
-      "pickupsMs": 0.005,
-      "fxMs": 0.263,
-      "renderMs": 3.06,
-      "drawCalls": 72,
-      "triangles": 335172,
-      "programs": 39,
+      "frames": 90,
+      "frameMsAvg": 323.05,
+      "frameMsP50": 16.5,
+      "frameMsP95": 2468.1,
+      "simMs": 1.237,
+      "enemiesMs": 0.537,
+      "weaponsMs": 0.281,
+      "projectilesMs": 0.271,
+      "pickupsMs": 0.001,
+      "fxMs": 0.351,
+      "renderMs": 4.34,
+      "drawCalls": 88,
+      "triangles": 302623,
+      "programs": 40,
       "geometries": 111,
       "textures": 4,
-      "heapDeltaKB": -14947,
-      "heapMB": 57,
+      "heapDeltaKB": -1285,
+      "heapMB": 33,
       "effectiveQuality": "low",
       "weapons": [
         "ember_bolt:8",
@@ -386,15 +272,15 @@
       "topMeshes": [
         {
           "key": "MeshStandardMaterial",
-          "tris": 279588,
+          "tris": 258198,
           "meshes": 40,
-          "instances": 15584
+          "instances": 15560
         },
         {
           "key": "MeshBasicMaterial",
-          "tris": 58070,
+          "tris": 46830,
           "meshes": 35,
-          "instances": 239
+          "instances": 237
         },
         {
           "key": "vfx-strips",
@@ -404,15 +290,9 @@
         },
         {
           "key": "ShaderMaterial",
-          "tris": 3759,
+          "tris": 3717,
           "meshes": 8,
-          "instances": 248
-        },
-        {
-          "key": "vfx-particles",
-          "tris": 1996,
-          "meshes": 1,
-          "instances": 998
+          "instances": 227
         },
         {
           "key": "Head_1 [shadow]",
@@ -421,124 +301,34 @@
           "instances": 1
         },
         {
-          "key": "Body_1 [shadow]",
-          "tris": 1160,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "Body_2 [shadow]",
-          "tris": 1056,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "Body_5 [shadow]",
-          "tris": 576,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "Staff_1",
-          "tris": 560,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "FootL [shadow]",
-          "tris": 440,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "FootR [shadow]",
-          "tris": 440,
-          "meshes": 1,
-          "instances": 1
-        }
-      ],
-      "shadowCasterTris": 6684,
-      "lights": {
-        "point": 3,
-        "pointShadow": 0,
-        "dir": 1,
-        "dirShadow": 0
-      },
-      "quality": "low"
-    },
-    {
-      "count": 200,
-      "renderedFrames": 20,
-      "alive": 199,
-      "frames": 80,
-      "frameMsAvg": 100.84,
-      "frameMsP50": 16.8,
-      "frameMsP95": 811,
-      "simMs": 1.695,
-      "enemiesMs": 1.067,
-      "weaponsMs": 0.311,
-      "projectilesMs": 0.131,
-      "pickupsMs": 0.009,
-      "fxMs": 0.231,
-      "renderMs": 3.72,
-      "drawCalls": 72,
-      "triangles": 418660,
-      "programs": 39,
-      "geometries": 111,
-      "textures": 4,
-      "heapDeltaKB": -16596,
-      "heapMB": 58,
-      "effectiveQuality": "low",
-      "weapons": [
-        "ember_bolt:8",
-        "cinder_halo:8",
-        "spark_chain:8",
-        "brazier:8",
-        "flare_nova:8",
-        "wick_lance:8"
-      ],
-      "topMeshes": [
-        {
-          "key": "MeshStandardMaterial",
-          "tris": 353871,
-          "meshes": 40,
-          "instances": 15674
-        },
-        {
-          "key": "MeshBasicMaterial",
-          "tris": 59282,
-          "meshes": 35,
-          "instances": 327
-        },
-        {
-          "key": "vfx-strips",
-          "tris": 12000,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "ShaderMaterial",
-          "tris": 3803,
-          "meshes": 8,
-          "instances": 270
-        },
-        {
-          "key": "vfx-particles",
-          "tris": 1900,
-          "meshes": 1,
-          "instances": 950
-        },
-        {
-          "key": "Head_1 [shadow]",
+          "key": "Head_1",
           "tris": 1712,
           "meshes": 1,
           "instances": 1
         },
         {
+          "key": "vfx-particles",
+          "tris": 1334,
+          "meshes": 1,
+          "instances": 667
+        },
+        {
           "key": "Body_1 [shadow]",
           "tris": 1160,
           "meshes": 1,
           "instances": 1
+        },
+        {
+          "key": "Body_1",
+          "tris": 1160,
+          "meshes": 1,
+          "instances": 1
+        },
+        {
+          "key": "Staff_1",
+          "tris": 1120,
+          "meshes": 2,
+          "instances": 2
         },
         {
           "key": "Body_2 [shadow]",
@@ -547,26 +337,8 @@
           "instances": 1
         },
         {
-          "key": "Body_5 [shadow]",
-          "tris": 576,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "Staff_1",
-          "tris": 560,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "FootL [shadow]",
-          "tris": 440,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "FootR [shadow]",
-          "tris": 440,
+          "key": "Body_2",
+          "tris": 1056,
           "meshes": 1,
           "instances": 1
         }
@@ -582,26 +354,26 @@
     },
     {
       "count": 350,
-      "renderedFrames": 20,
-      "alive": 349,
-      "frames": 80,
-      "frameMsAvg": 41.52,
-      "frameMsP50": 16.8,
-      "frameMsP95": 24.4,
-      "simMs": 2.278,
-      "enemiesMs": 1.413,
-      "weaponsMs": 0.345,
-      "projectilesMs": 0.079,
-      "pickupsMs": 0.159,
-      "fxMs": 0.256,
-      "renderMs": 3.31,
-      "drawCalls": 72,
-      "triangles": 549485,
-      "programs": 39,
+      "renderedFrames": 22,
+      "alive": 347,
+      "frames": 90,
+      "frameMsAvg": 474.91,
+      "frameMsP50": 16.2,
+      "frameMsP95": 4152.8,
+      "simMs": 3.036,
+      "enemiesMs": 2.153,
+      "weaponsMs": 0.509,
+      "projectilesMs": 0.186,
+      "pickupsMs": 0.082,
+      "fxMs": 0.372,
+      "renderMs": 8.06,
+      "drawCalls": 88,
+      "triangles": 542887,
+      "programs": 40,
       "geometries": 111,
       "textures": 4,
-      "heapDeltaKB": 759,
-      "heapMB": 42,
+      "heapDeltaKB": -553,
+      "heapMB": 33,
       "effectiveQuality": "low",
       "weapons": [
         "ember_bolt:8",
@@ -614,15 +386,15 @@
       "topMeshes": [
         {
           "key": "MeshStandardMaterial",
-          "tris": 505181,
+          "tris": 453721,
           "meshes": 40,
-          "instances": 15857
+          "instances": 15815
         },
         {
           "key": "MeshBasicMaterial",
-          "tris": 69958,
+          "tris": 74682,
           "meshes": 35,
-          "instances": 484
+          "instances": 469
         },
         {
           "key": "vfx-strips",
@@ -632,18 +404,24 @@
         },
         {
           "key": "ShaderMaterial",
-          "tris": 3645,
+          "tris": 3843,
           "meshes": 8,
-          "instances": 191
+          "instances": 290
         },
         {
           "key": "vfx-particles",
-          "tris": 2464,
+          "tris": 2882,
           "meshes": 1,
-          "instances": 1232
+          "instances": 1441
         },
         {
           "key": "Head_1 [shadow]",
+          "tris": 1712,
+          "meshes": 1,
+          "instances": 1
+        },
+        {
+          "key": "Head_1",
           "tris": 1712,
           "meshes": 1,
           "instances": 1
@@ -655,32 +433,26 @@
           "instances": 1
         },
         {
+          "key": "Body_1",
+          "tris": 1160,
+          "meshes": 1,
+          "instances": 1
+        },
+        {
+          "key": "Staff_1",
+          "tris": 1120,
+          "meshes": 2,
+          "instances": 2
+        },
+        {
           "key": "Body_2 [shadow]",
           "tris": 1056,
           "meshes": 1,
           "instances": 1
         },
         {
-          "key": "Body_5 [shadow]",
-          "tris": 576,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "Staff_1",
-          "tris": 560,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "FootL [shadow]",
-          "tris": 440,
-          "meshes": 1,
-          "instances": 1
-        },
-        {
-          "key": "FootR [shadow]",
-          "tris": 440,
+          "key": "Body_2",
+          "tris": 1056,
           "meshes": 1,
           "instances": 1
         }
@@ -695,7 +467,11 @@
       "quality": "low"
     }
   ],
-  "flags": [],
-  "errors": [],
-  "note": "Sprint 2 re-baseline (QA, 2026-11-04): merged from two runs (100/350 and 200) on the same build; low-tier draw calls +5..12 vs sprint 1 accepted (see perf-report.md)."
+  "flags": [
+    "REGRESSION high/100: draw calls 131 → 152",
+    "REGRESSION high/350: sim 1.811 → 4.088 ms",
+    "REGRESSION low/100: draw calls 72 → 88",
+    "REGRESSION low/350: draw calls 72 → 88"
+  ],
+  "errors": []
 }

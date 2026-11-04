@@ -797,7 +797,7 @@ html.a11y-cb .r-relic .uc-badge { border-radius: 50%; }
   animation: cardIn 0.7s cubic-bezier(0.2, 1.25, 0.4, 1) both; animation-delay: calc(var(--i) * 0.12s + 0.7s);
   transition: translate 0.16s cubic-bezier(0.3, 1.7, 0.5, 1), scale 0.16s cubic-bezier(0.3, 1.7, 0.5, 1), box-shadow 0.16s;
 }
-.dc-dawn { --dc: #ffc65a; background: radial-gradient(ellipse 90% 55% at 50% 0%, rgba(255, 236, 170, 0.7), transparent 70%), linear-gradient(180deg, #b8586a 0%, #6a2e72 55%, #2e1652 100%); }
+.dc-dawn { --dc: #ffc65a; background: radial-gradient(ellipse 90% 50% at 50% 0%, rgba(255, 250, 220, 0.75), transparent 70%), linear-gradient(180deg, #ffd27a 0%, #ff9a5a 40%, #b4506a 68%, #6a3a7a 100%); }
 .dc-night { --dc: var(--violet); background: radial-gradient(ellipse 90% 55% at 50% 0%, rgba(170, 150, 255, 0.5), transparent 70%), linear-gradient(180deg, #3e2c9a 0%, #221a6a 55%, #120c3c 100%); }
 .dawn-card:hover, .dawn-card:focus { translate: 0 -0.6rem; scale: 1.04; box-shadow: inset 0 0 0 3px var(--dc), 0 calc(0.45rem + 0.6rem) 0 rgba(18, 11, 46, 0.6), 0 0 3.4rem color-mix(in srgb, var(--dc) 75%, transparent); }
 .dc-orb { display: grid; place-items: center; width: 6rem; height: 6rem; border-radius: 50%; font-size: 3.2rem; border: 3px solid var(--outline); box-shadow: 0 4px 0 var(--outline), 0 0 2.2rem color-mix(in srgb, var(--dc) 80%, transparent); }
@@ -1134,4 +1134,105 @@ html.a11y-calm .chest-timer { animation-duration: var(--dur) !important; }
 }
 @media (prefers-reduced-motion: reduce) {
   .menu-embers, .lu-burst, .uc-rays, .dawn-stars { display: none !important; }
+}
+
+/* ================================================================== sprint 3: gameplay-frame readability (art review s2) */
+/* --- world announcement banners (UI.announce): ~22% height, under the dawn bar, one at a time (#9, BUG-QA-019) */
+.announce {
+  --ac: var(--amber-hi); --ag: rgba(255, 150, 60, 0.55);
+  position: absolute; left: 50%; top: 22%; z-index: 40; translate: -50% -50%; pointer-events: none; opacity: 0;
+  display: flex; align-items: center; gap: 0.6rem; max-width: calc(100vw - 32px); padding: 0.35rem 2.4rem 0.45rem;
+  font-family: var(--font-display); font-weight: 400; font-size: 1.7rem; line-height: 1.1; letter-spacing: 0.03em; text-align: center; color: #fff4dc;
+  paint-order: stroke fill; -webkit-text-stroke: 0.14em var(--outline); text-shadow: 0 0.09em 0 var(--outline), 0 0 0.9rem var(--ag);
+  /* a soft band of shadow behind the words keeps them legible over a bright horde, with no hard box */
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, rgba(6, 4, 22, 0.62), rgba(6, 4, 22, 0.35) 60%, rgba(6, 4, 22, 0) 100%);
+  transition: opacity 0.3s ease-in;
+}
+.announce.visible { opacity: 1; transition: opacity 0.15s ease-out; animation: annPop 0.35s cubic-bezier(0.2, 1.7, 0.4, 1); }
+@keyframes annPop { from { scale: 1.22; } }
+.ann-text { min-width: 0; }
+.ann-glyph { flex: none; display: inline-grid; place-items: center; font-size: 0.8em; color: var(--ac); -webkit-text-stroke: 0; filter: drop-shadow(0 2px 0 var(--outline)) drop-shadow(0 0 6px var(--ag)); }
+.ann-glyph:empty { display: none; }
+.ann-elite { --ac: #ff8ab0; --ag: rgba(255, 90, 140, 0.55); }
+.ann-boss { --ac: var(--gold); --ag: rgba(192, 77, 255, 0.7); color: #fff1c8; }
+.ann-danger { --ac: var(--danger-hi); --ag: rgba(255, 60, 90, 0.55); }
+.ann-buff { --ac: var(--amber-hi); --ag: rgba(255, 200, 90, 0.7); }
+.ann-info { --ac: var(--xp-hi); --ag: rgba(86, 236, 255, 0.45); }
+/* the legacy Fx 'ft-big' banner never stacks on top of ours, and a hint card replaces either */
+#ui-root.announcing .fx-banner, #ui-root.hint-up .fx-banner { visibility: hidden; }
+#ui-root.overlay-up .announce { visibility: hidden; }
+/* the boss bar no longer sits under the timer, so the legacy banner keeps the same slot as ours while a boss is up */
+#ui-root .fx-layer .fx-banner { top: 22% !important; }
+@media (max-width: 760px) { #ui-root .fx-layer .fx-banner { top: 25% !important; font-size: 20px; white-space: normal; width: max-content; max-width: calc(100vw - 32px); text-align: center; } }
+
+/* --- modal scrim (#16): damage numbers / rings never show through level-up, reliquary and dawn */
+#ui-root.overlay-up .fx-layer { visibility: hidden; }
+.screen-levelup { background: radial-gradient(ellipse at 50% 42%, rgba(48, 32, 130, 0.62), rgba(6, 4, 22, 0.9) 72%); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.screen-chest { backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); background: radial-gradient(ellipse 70% 55% at 50% 74%, rgba(255, 196, 90, 0.28), rgba(40, 22, 96, 0.72) 45%, rgba(6, 4, 22, 0.92) 80%); }
+.screen-chest.chest-evo { background: radial-gradient(ellipse 70% 60% at 50% 60%, rgba(255, 226, 120, 0.38), rgba(72, 40, 96, 0.72) 45%, rgba(8, 5, 24, 0.93) 82%); }
+
+/* --- weapon badges tinted from the weapon's own colour (#14); dark ink on pale colours */
+.ucard.tinted .uc-badge, .ch-item.tinted .uc-badge {
+  position: relative; color: var(--wi, #fff);
+  background: radial-gradient(circle at 35% 28%, color-mix(in srgb, var(--wc) 40%, white), var(--wc) 52%, color-mix(in srgb, var(--wc) 52%, #120a30));
+  box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.22), inset 0 3px 0 rgba(255, 255, 255, 0.5), 0 4px 0 var(--outline), 0 0 1.8rem color-mix(in srgb, var(--wc) 60%, transparent);
+}
+.ucard.tinted .uc-badge .icon, .ch-item.tinted .uc-badge .icon { filter: drop-shadow(0 2px 0 rgba(20, 8, 40, 0.35)); }
+.uc-badge { position: relative; }
+.slot.weapon > .icon { color: var(--wi, #fff); }
+.badge-tint { color: var(--wi, #fff); }
+/* evolved weapons: own glyph + a small gold crown pinned to the badge / slot */
+.evo-crown {
+  position: absolute; top: -0.55em; right: -0.45em; width: 1.5em; height: 1.5em; display: grid; place-items: center; font-size: 0.42em; rotate: 14deg;
+  color: #4a2a00; background: radial-gradient(circle at 35% 28%, #fffbe0, var(--evo) 55%, var(--evo-lo)); border: 2.5px solid var(--outline); border-radius: 50%;
+  box-shadow: 0 2px 0 var(--outline), 0 0 0.6rem rgba(255, 220, 90, 0.8);
+}
+.evo-crown .icon { filter: none !important; width: 1em; height: 1em; }
+.slot .evo-crown { font-size: 1.1rem; top: -0.5rem; right: -0.5rem; width: 1.15rem; height: 1.15rem; border-width: 2px; }
+.slot .evo-crown .icon { width: 0.72rem; height: 0.72rem; }
+/* the NEW WEAPON / NEW RELIC ribbon gets a little shine instead of a separate NEW! sticker */
+.ucard.is-new .uc-ribbon { overflow: hidden; }
+.ucard.is-new .uc-ribbon::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.5) 48%, transparent 60%); background-size: 260% 100%; animation: shine 2.6s linear infinite; }
+html.a11y-noflash .ucard.is-new .uc-ribbon::after { animation: none; opacity: 0; }
+
+/* --- HUD slots: owned + one empty per row (#19) */
+.slot.empty { width: 2.1rem; height: 2.1rem; margin: 0.22rem; border-radius: 0.65rem; background: rgba(10, 8, 36, 0.4); border: 2px dashed rgba(170, 160, 255, 0.3); }
+
+/* --- boss bar at the bottom centre, above the light gauge's row, never over the boss (#13) */
+.boss-bar { position: absolute; left: 50%; bottom: calc(var(--g-bottom) + 0.2rem); translate: -50% 0; margin: 0; width: min(30rem, calc(100vw - 2 * (var(--g-left) + 22rem))); min-width: 18rem; }
+.boss-bar.visible { animation-name: bossInLow; }
+@keyframes bossInLow { from { opacity: 0; transform: translateY(1rem) scaleX(0.6); } }
+.boss-sub { margin-top: 0.25rem; }
+.hud.behind .boss-bar { opacity: 0; }
+#ui-root.boss-up .hint-card { bottom: calc(var(--g-bottom) + 6.2rem); }
+#ui-root.boss-up .toast { bottom: calc(var(--g-bottom) + 6.2rem); }
+#ui-root.boss-up.hint-up .toast { bottom: calc(var(--g-bottom) + 11.5rem); }
+@media (max-width: 1100px) {
+  /* not enough room beside the light gauge: stack the boss bar above it */
+  .boss-bar { left: var(--g-left); translate: 0 0; bottom: calc(var(--g-bottom) + 6.6rem); width: min(26rem, calc(100vw - var(--g-left) - var(--g-right))); min-width: 0; text-align: left; }
+  #ui-root.boss-up .hint-card { bottom: calc(var(--g-bottom) + 12rem); }
+  #ui-root.boss-up .toast { bottom: calc(var(--g-bottom) + 12rem); }
+}
+
+/* --- dawn (#17): gold "Greet the Dawn" vs indigo "Endless Night"; the sun clears the hills by ~1.5 s */
+.dawn-sky::before { animation-duration: 1.6s; }
+/* the cards cover the horizon, so the sun rises behind the title instead and is up (and visible) by ~1.5 s */
+.dawn-sun { z-index: 4; top: 1%; bottom: auto; width: 24rem; height: 24rem; margin-left: -12rem; animation: sunRiseHigh 1.5s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+@keyframes sunRiseHigh { from { transform: translateY(55%) scale(0.8); opacity: 0.25; } }
+.dawn-rays { z-index: 3; top: 21%; animation: spin 70s linear infinite, burstIn 1.2s ease-out 0.4s both; }
+.dc-dawn .dc-name { color: #fff8e4; }
+.dc-dawn .dc-desc { color: #fff; text-shadow: 0 1px 2px rgba(40, 10, 40, 0.8); }
+.dc-dawn .dc-tag { background: rgba(40, 14, 40, 0.55); }
+
+/* --- game over (#18, BUG-QA-018): cards sized to content; long achievement lists collapse */
+.go-cols { align-items: start; }
+.go-ach-more { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.6rem; font-size: 0.85rem; color: var(--evo-hi); border-radius: 0.8rem; border: 2px dashed rgba(255, 216, 74, 0.35); }
+.go-ach-more .icon { color: var(--gold); }
+
+@media (max-width: 760px) {
+  .dawn-sun { width: 17rem; height: 17rem; margin-left: -8.5rem; top: 2%; }
+  .announce { top: 25%; font-size: 1.3rem; padding: 0.3rem 1.2rem 0.4rem; white-space: normal; width: max-content; max-width: calc(100vw - 32px); }
+  .boss-bar { left: 50%; translate: -50% 0; bottom: calc(var(--g-bottom) + 5.4rem); width: min(24rem, calc(100vw - 32px)); text-align: center; }
+  #ui-root.boss-up .hint-card { bottom: calc(var(--g-bottom) + 11.4rem); }
+  #ui-root.boss-up .toast { bottom: calc(var(--g-bottom) + 11.4rem); }
 }

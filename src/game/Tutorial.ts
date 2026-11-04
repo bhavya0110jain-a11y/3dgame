@@ -50,6 +50,17 @@ export class Tutorial {
     return this.getSave().hintsSeen.includes(id);
   }
 
+  /**
+   * Un-marks hint `id` as seen, so it can fire again later in this (or a later) run. The UI calls this when a queued
+   * hint went stale before the player could read it (e.g. 'lowlight' after the light was refilled — BUG-QA-020).
+   */
+  forget(id: string): void {
+    const seen = this.getSave().hintsSeen;
+    if (!seen.includes(id)) return;
+    for (let i = seen.length - 1; i >= 0; i--) if (seen[i] === id) seen.splice(i, 1);
+    this.persist();
+  }
+
   /** Fires hint `id` if onboarding is active and it has not been shown yet. Returns true when emitted. */
   show(id: string): boolean {
     if (!this.active) return false;

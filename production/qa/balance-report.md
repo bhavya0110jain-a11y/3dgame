@@ -126,6 +126,37 @@ run 6, death at 2:10) and brutes did 500–836 damage per long run in 23–33 hi
 `Enemies.ts` or a longer post-hit invulnerability in `Player.ts` would remove the last spike; requested from those owners.
 Tuning knobs if human playtests disagree: `PRESSURE_*`, `LATE_HP`, `LATE_FROM`, `damageScale` in `src/game/Director.ts`.
 
+## Sprint 3 — re-check after the contact-damage cooldown (gameplay agent)
+
+**Trigger:** the readability agent added a per-enemy contact cooldown (`CONTACT_COOLDOWN = 0.8 s`, `Enemies.ts`), which
+removes the "one stalker hits every 0.35 s" spike flagged in Sprint 2 — and with it a slice of all melee damage taken.
+
+| Tuning | Fresh save (sim, 8 seeds, skill 0.8) | Half Hearth (sim, 4) | Full Hearth (sim, 4) |
+|---|---|---|---|
+| S2 numbers + cooldown | mean **12:26**, 5:52 … 17:21, **2/8 wins** (TTK 87–140 s) | — | 4/4 wins, TTK 39–74 s, dmg taken 67–178 |
+| **S3: `LATE_DMG` 0.08 → 0.11** (shipped) | mean **10:05**, 6:15 … 16:51, 0/8 wins | mean 11:44 (9:33 … 14:52), 0/4 | **4/4 wins**, TTK 48–96 s, dmg taken 15–455 |
+
+**Change:** `damageScale(m) = 1 + 0.04m + LATE_DMG·max(0, m − 6)` with `LATE_DMG` 0.08 → **0.11** (1.54 @8, 1.84 @10,
+2.59 @15; boss fight still capped at ×1.3). The first 6 minutes are untouched, so the cooldown's benefit stays where
+first-run players need it; the mid-late game wins back the damage it removed. Formula + knobs: `design/gdd/director.md`.
+
+**Browser bot** (`tools/playtest-bot.mjs --runs 3 --meta none --substeps 4`, production build of this tree incl. the other
+sprint-3 agents' changes): **6:53 · 7:15 · 8:29** (mean 7:32, 0/3 dawn). Worst 30 s window 141 dmg at 3:30 (run 1, shades +
+crawlers while at level 17); runs 2–3 took only 285–307 damage in total and ran out of light at 7–8.5 min. Top damage
+sources: brute (128 in run 3), shade, crawler, jellyling.
+
+**Reading it.** A decent bot now ends a fresh-save run at 7–8.5 min and the sim's skill-0.8 player at ~10 min with no
+first-run victories; a real first-time player sits at or below the bot → inside the 6–9 min target. Full Hearth still wins
+every sim run (boss TTK ≤ 96 s), so "a maxed Hearth wins most of the time" holds. Half Hearth went from 1–2/5 wins (S2) to
+0/4 with mean 11:44 — the mid-progression is a little harsher; if human playtests find the 4th–8th run frustrating, lower
+`LATE_DMG` to 0.09 first (≈ +45 s mean, interpolated from the two sim rows) before touching early-game numbers. Sim-vs-bot gap: the bot dies ~2.5 min
+earlier than the sim at the same nominal skill (different steering AI and the full browser game); compare runs only within one tool.
+
+**Other gameplay changes this sprint** (no balance effect): boss-kill outro — 0.35× slow-mo for 0.6 s and no choice screen
+for 1.3 s of game time so the master's collapse plays before the dawn (`BOSS_OUTRO_TIME`, `Game.ts`); endless night's first
+returning master is the night's own (then cycle); world banners routed through `UI.announce` (BUG-QA-019); Shift+digit
+banish records Shift at keydown (BUG-QA-017).
+
 ## How to re-run
 ```bash
 node tools/gen-model-manifest.mjs && npx vite build --outDir /tmp/build

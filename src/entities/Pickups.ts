@@ -90,7 +90,15 @@ export class PickupManager {
       }
     }
     const p = this.free.pop() ?? ({} as Pickup);
-    Object.assign(p, { active: true, kind, x, z, value, magnetized: false, speed: 0, phase: Math.random() * 10 });
+    // field-by-field (BUG-QA-016: no per-spawn object literal)
+    p.active = true;
+    p.kind = kind;
+    p.x = x;
+    p.z = z;
+    p.value = value;
+    p.magnetized = false;
+    p.speed = 0;
+    p.phase = Math.random() * 10;
     this.list.push(p);
   }
 
@@ -239,6 +247,10 @@ export class PickupManager {
     let ne = 0, no = 0, nc = 0, nb = 0, na = 0;
     const g = this.glows;
     g.begin(time);
+    // a late-game field of hundreds of gems must not read as confetti over the fight: past ~120 pickups every gem
+    // and halo dims (down to 55%) and glints stop
+    const crowd = 1 - 0.45 * Math.min(1, Math.max(0, (this.list.length - 120) / 280));
+    const glints = this.list.length < 200;
     for (const p of this.list) {
       const bob = Math.sin(p.phase * 3) * 0.1;
       const pulse = Math.sin(p.phase * 5);
@@ -253,12 +265,12 @@ export class PickupManager {
           tmpS.setScalar(s * (1 + 0.08 * pulse));
           tmpM.compose(tmpP, tmpQ, tmpS);
           this.emberMesh.setMatrixAt(ne, tmpM);
-          tmpC.setHex(col).multiplyScalar(2.3 + 0.6 * pulse);
+          tmpC.setHex(col).multiplyScalar((1.9 + 0.5 * pulse) * crowd);
           this.emberMesh.setColorAt(ne, tmpC);
           ne++;
-          g.add(p.x, y, p.z, 0.8 * s, Frame.GLOW, col, 0.42 + 0.14 * pulse);
+          g.add(p.x, y, p.z, 0.8 * s, Frame.GLOW, col, (0.42 + 0.14 * pulse) * crowd);
           // periodic glint (each ember on its own phase)
-          const gl = Math.sin(p.phase * 1.9 + p.x * 0.7 + p.z * 0.3);
+          const gl = glints ? Math.sin(p.phase * 1.9 + p.x * 0.7 + p.z * 0.3) : 0;
           if (gl > 0.9) {
             const k = (gl - 0.9) / 0.1;
             g.add(p.x + 0.05 * s, y + 0.14 * s, p.z, 1.4 * s * k, Frame.STAR, 0xffffff, 2.6 * k, 1, p.phase * 0.7);

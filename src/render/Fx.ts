@@ -6,6 +6,7 @@ import { GroundFx, GF_UNSCALED, GM_GLOW, GM_RUNE, GM_SHOCK, GM_TELEGRAPH } from 
 import { Lightning, Ribbons, Strips } from './vfx/Strips';
 import { Billboards } from './vfx/Billboards';
 import { FirePools } from './vfx/FirePools';
+import { setFocusPoint } from './vfx/focus';
 
 /**
  * FxManager — every transient visual effect in the game ("moonlit storybook" VFX). Draw calls, total:
@@ -26,7 +27,29 @@ interface FloatText {
   age: number; life: number;
   pop: number;
   active: boolean;
+  /** Damage number (merge-able, counts toward NUM_CAP) vs. callout text. */
+  dmg: boolean;
+  crit: boolean;
+  /** Running total shown (merged hits) and seconds since it first appeared (merge window). */
+  value: number;
+  since: number;
+  /** Bumped every time the slot is reused, so stale merge handles are rejected. */
+  serial: number;
+  /** Base opacity (non-crit numbers are drawn at 80%). */
+  alpha: number;
+  /** Index in the pool (merge handle). */
+  idx: number;
 }
+
+/** Damage numbers: hits on one enemy within NUM_MERGE seconds add up in one number; at most NUM_CAP numbers are on
+ *  screen (non-crits are dropped first). Non-crits draw at NUM_SMALL scale and NUM_ALPHA opacity. */
+export const NUM_MERGE = 0.25;
+export const NUM_CAP = 24;
+export const NUM_SMALL = 0.7;
+export const NUM_ALPHA = 0.8;
+/** World banners ('ft-big'): one at a time, under the dawn bar, BANNER_TIME seconds each. */
+export const BANNER_TIME = 1.2;
+const BANNER_QUEUE = 4;
 
 /** Text style per damage-number class: [cssClass, life, popScale, rise]. */
 const TEXT_STYLES: Record<string, [string, number, number, number]> = {
@@ -89,10 +112,11 @@ const FX_CSS = `
 .fxt-light{color:#fff2b8;text-shadow:0 2px 0 #3a2a06,0 0 12px rgba(255,220,120,.6);-webkit-text-stroke-color:#3a2606}
 .fxt-blue{color:#c4f0ff;text-shadow:0 2px 0 #0c2448,0 0 12px rgba(110,200,255,.8);-webkit-text-stroke-color:#0c2448}
 .fxt-frost{color:#dcfbff;text-shadow:0 2px 0 #0d3346,0 0 12px rgba(140,230,255,.75);-webkit-text-stroke-color:#0d3346}
-.fxt-crit{font-size:30px;color:#ffe04a;-webkit-text-stroke:4px #5a1206;text-shadow:0 3px 0 #5a1206,0 0 18px rgba(255,120,30,.95),0 0 4px #fff3b0}
+.fxt-crit{font-size:26px;color:#fffdf7;-webkit-text-stroke:4px #c4570e;text-shadow:0 3px 0 #3a1004,0 0 6px rgba(20,8,30,.85)}
 .fxt-heal{font-size:24px;color:#d2ff7a;-webkit-text-stroke:3px #1d3a0a;text-shadow:0 2px 0 #1d3a0a,0 0 14px rgba(170,255,90,.7)}
 .fxt-player{font-size:22px;color:#ff6a6a;-webkit-text-stroke:3px #3a0612;text-shadow:0 2px 0 #3a0612,0 0 12px rgba(255,60,80,.7)}
 .fxt-big{font-family:'Cinzel',var(--font-display,serif);font-weight:700;font-size:30px;letter-spacing:.06em;color:#ffe9c4;-webkit-text-stroke:0;text-shadow:0 0 18px #ff8a3c,0 0 42px rgba(255,120,40,.6),0 3px 4px #000}
+.fx-banner{position:absolute;left:50%;top:22%;transform:translate(-50%,-50%);pointer-events:none;white-space:nowrap;font-family:'Cinzel',var(--font-display,serif);font-weight:700;font-size:27px;letter-spacing:.06em;color:#ffe9c4;text-shadow:0 0 14px rgba(255,138,60,.75),0 0 30px rgba(255,120,40,.4),0 2px 4px #000;opacity:0;will-change:opacity,transform}
 `;
 
 const LIGHTS = 2;
@@ -103,6 +127,21 @@ const IK_GLOW = 0, IK_GROUND = 1, IK_COLUMN = 2;
 /** Immediate-mode strip header: n w0 w1 color intensity a0 a1 core, then n xyz points. */
 const IS_H = 8;
 const IS_CAP = 16384;
+
+/**
+ * Brightness governor (art review s2 #3.1). load = Σ layer energy / layer reference; gain falls linearly from 1 at
+ * load GOV_KNEE to GAIN_FLOOR at GOV_KNEE + GOV_RANGE. References ≈ what one busy-but-readable mid-game frame emits.
+ */
+export const GAIN_FLOOR = 0.3;
+export const GOV_KNEE = 2.5;
+export const GOV_RANGE = 5.0;
+const GOV_PARTICLES = 220;
+const GOV_GROUND = 120;
+const GOV_IMM = 60;
+const GOV_STRIPS = 40;
+const GOV_FIRE = 12;
+/** Dawnbreak sunrise ring: max visible width (m). */
+export const DAWN_RING = 1.2;
 
 export class FxManager {
   readonly particles: ParticleSystem;
@@ -121,6 +160,7 @@ export class FxManager {
   private imm = new Float32Array(IMM_MAX * IMM_F);
   private immCount = 0;
   private immFresh = false;
+  private immEnergy = 0;
   // immediate-mode strips (beams, tethers) for this frame — see IS_H
   private immS = new Float32Array(IS_CAP);
   private immSLen = 0;
@@ -136,8 +176,12 @@ export class FxManager {
   /** 1 normally, ~0.35 with reduced flashing: multiplier for flash intensity. */
   private flashK = 1;
   private flashCheck = 0;
-  /** Current brightness-governor gain (1 = calm, ~0.6 = screen full of light). */
+  /** Current brightness-governor gain (1 = calm, GAIN_FLOOR = screen full of light). */
   private gain = 1;
+  /** Governor input last frame: normalised additive light on screen (0 calm, ≥1 saturated). */
+  private load = 0;
+  private critBudget = 0;
+  private deathBudget = 0;
   private tollT = -1;
   private tollX = 0;
   private tollZ = 0;
@@ -153,6 +197,11 @@ export class FxManager {
 
   private texts: FloatText[] = [];
   private readonly maxTexts = 90;
+  private textSerial = 0;
+  private activeNums = 0;
+  private bannerEl: HTMLDivElement | null = null;
+  private bannerQ: string[] = [];
+  private bannerT = -1;
   private tmp = new THREE.Vector3();
   private lastReal = 0;
   private hitBudget = 0;
@@ -166,7 +215,7 @@ export class FxManager {
     this.bolts = new Lightning(160);
     this.ribbons = new Ribbons(64);
     this.fire = new FirePools(scene, 48);
-    this.boards = new Billboards(scene, IMM_MAX + 16, 23);
+    this.boards = new Billboards(scene, IMM_MAX + 16, 23, true);
     for (let i = 0; i < LIGHTS; i++) {
       const l = new THREE.PointLight(0xffffff, 0, 8, 1.6);
       l.castShadow = false;
@@ -226,31 +275,101 @@ export class FxManager {
     this.ground.add(GM_SHOCK, x, z, from, to, life, color, 2.2, Math.max(0.12, to * 0.045));
   }
 
-  /** Floating damage number / announcement (pooled DOM, pop + bounce animation, styled per class). */
+  /**
+   * Floating callout / damage number (pooled DOM, pop + bounce animation, styled per class). 'ft-big' announcements
+   * become screen banners (one at a time, under the dawn bar — never over the bearer). Damage numbers from enemy hits
+   * should use damageNumber()/addToNumber() so they merge and respect the on-screen cap.
+   */
   text(x: number, y: number, z: number, str: string, cls = ''): void {
-    if (!this.damageNumbers && cls !== 'ft-big' && cls !== 'ft-heal') return;
+    if (cls === 'ft-big') {
+      this.banner(str);
+      return;
+    }
+    if (!this.damageNumbers && cls !== 'ft-heal') return;
     let key = cls;
     if (key === '' && this.lastHitSource) key = this.lastHitSource;
     this.lastHitSource = '';
+    this.spawnText(x, y, z, key === 'ft-crit' ? `${str}!` : str, key, false, false);
+  }
+
+  /**
+   * Damage number for a hit worth `amount`. Returns the slot to pass to addToNumber() for hits that follow within
+   * NUM_MERGE seconds, or -1 when the number was dropped (cap reached by crits / numbers off).
+   */
+  damageNumber(x: number, y: number, z: number, amount: number, cls = ''): number {
+    if (!this.damageNumbers) return -1;
+    let key = cls;
+    if (key === '' && this.lastHitSource) key = this.lastHitSource;
+    this.lastHitSource = '';
+    const crit = key === 'ft-crit';
+    const t = this.spawnText(x, y, z, crit ? `${Math.round(amount)}!` : `${Math.round(amount)}`, key, true, crit);
+    if (!t) return -1;
+    t.value = amount;
+    return t.idx;
+  }
+
+  /** Serial of a text slot (pair it with the slot so a recycled slot is never merged into). */
+  numberSerial(slot: number): number {
+    return this.texts[slot]?.serial ?? 0;
+  }
+
+  /** Adds a hit to a live damage number (see damageNumber). False when the slot is stale or its window has closed. */
+  addToNumber(slot: number, serial: number, amount: number, crit: boolean): boolean {
+    if (slot < 0) return false;
+    const t = this.texts[slot];
+    if (!t || !t.active || !t.dmg || t.serial !== serial || t.since > NUM_MERGE) return false;
+    this.lastHitSource = '';
+    t.value += amount;
+    if (crit && !t.crit) {
+      t.crit = true;
+      const st = TEXT_STYLES['ft-crit'];
+      t.el.className = st[0];
+      t.life = Math.max(t.life, st[1]);
+      t.pop = st[2];
+      t.alpha = 1;
+    }
+    t.el.textContent = t.crit ? `${Math.round(t.value)}!` : `${Math.round(t.value)}`;
+    // small re-pop so the growing total reads, without extending the number's life much
+    if (t.age > 0.12) t.age = 0.12;
+    return true;
+  }
+
+  private spawnText(x: number, y: number, z: number, str: string, key: string, dmg: boolean, crit: boolean): FloatText | null {
     const style = TEXT_STYLES[key] ?? TEXT_STYLES[''];
     let t: FloatText | undefined;
-    for (const c of this.texts) if (!c.active) { t = c; break; }
+    if (dmg && this.activeNums >= NUM_CAP) {
+      // cap reached: a non-crit is dropped; a crit replaces the oldest non-crit (or the oldest crit)
+      if (!crit) return null;
+      let best = -1;
+      for (const c of this.texts) if (c.active && c.dmg && !c.crit && c.since > best) { best = c.since; t = c; }
+      if (!t) for (const c of this.texts) if (c.active && c.dmg && c.since > best) { best = c.since; t = c; }
+      if (!t) return null;
+      this.activeNums--;
+    }
+    if (!t) for (const c of this.texts) if (!c.active) { t = c; break; }
     if (!t) {
       if (this.texts.length < this.maxTexts) {
         const el = document.createElement('div');
         this.uiLayer.appendChild(el);
-        t = { el, x: 0, y: 0, z: 0, vx: 0, vy: 0, age: 0, life: 1, pop: 1, active: false };
+        t = { el, x: 0, y: 0, z: 0, vx: 0, vy: 0, age: 0, life: 1, pop: 1, active: false, dmg: false, crit: false, value: 0, since: 0, serial: 0, alpha: 1, idx: this.texts.length };
         this.texts.push(t);
       } else {
-        // recycle the oldest non-announcement
+        // recycle the oldest
         let best = -1;
-        for (const c of this.texts) if (c.life < 2 && c.age > best) { best = c.age; t = c; }
-        if (!t) return;
+        for (const c of this.texts) if (c.age > best) { best = c.age; t = c; }
+        if (!t) return null;
+        if (t.dmg) this.activeNums--;
       }
     }
     t.active = true;
+    t.dmg = dmg;
+    t.crit = crit;
+    t.serial = ++this.textSerial;
+    t.since = 0;
+    t.value = 0;
+    if (dmg) this.activeNums++;
     if (t.el.className !== style[0]) t.el.className = style[0];
-    t.el.textContent = key === 'ft-crit' ? `${str}!` : str;
+    t.el.textContent = str;
     t.el.style.display = '';
     t.x = x + (this.r() - 0.5) * 0.5;
     t.y = y;
@@ -259,7 +378,46 @@ export class FxManager {
     t.vy = style[3];
     t.age = 0;
     t.life = style[1];
-    t.pop = style[2];
+    const small = dmg && !crit;
+    t.pop = style[2] * (small ? NUM_SMALL : 1);
+    t.alpha = small ? NUM_ALPHA : 1;
+    return t;
+  }
+
+  /** Queues a world announcement banner (deduplicated; one shown at a time). */
+  banner(str: string): void {
+    if (typeof document === 'undefined') return;
+    const q = this.bannerQ;
+    if (q[q.length - 1] === str || (this.bannerT >= 0 && this.bannerEl?.textContent === str && q.length === 0)) return;
+    if (q.length >= BANNER_QUEUE) q.shift();
+    q.push(str);
+  }
+
+  private updateBanner(realDt: number): void {
+    if (this.bannerT < 0 && this.bannerQ.length === 0) return;
+    if (!this.bannerEl) {
+      const el = document.createElement('div');
+      el.className = 'fx-banner';
+      this.uiLayer.appendChild(el);
+      this.bannerEl = el;
+    }
+    const el = this.bannerEl;
+    if (this.bannerT < 0) {
+      el.textContent = this.bannerQ.shift() ?? '';
+      this.bannerT = 0;
+      // under the dawn bar; while a boss bar is up, under the boss bar instead
+      el.style.top = document.querySelector?.('.boss-bar.visible') ? '33%' : '22%';
+    }
+    this.bannerT += realDt;
+    const t = this.bannerT;
+    if (t >= BANNER_TIME) {
+      this.bannerT = -1;
+      el.style.opacity = '0';
+      return;
+    }
+    const a = Math.min(1, t / 0.15, (BANNER_TIME - t) / 0.3);
+    el.style.opacity = a.toFixed(2);
+    el.style.transform = `translate(-50%,-50%) scale(${(1 + 0.12 * Math.max(0, 1 - t / 0.2)).toFixed(3)})`;
   }
 
   // ======================================================================== combat feedback
@@ -278,7 +436,9 @@ export class FxManager {
     if (dl > 1e-4) { dx = dirX / dl; dz = dirZ / dl; } else { const a = this.r() * 6.28; dx = Math.cos(a); dz = Math.sin(a); }
     // impact point on the side of the body facing the attacker
     const ix = x - dx * 0.35 * scale, iz = z - dz * 0.35 * scale;
-    if (crit || this.hitBudget > 16) ps.emit(ix, y, iz, 0, 0, 0, crit ? 0.14 : 0.08, crit ? 1.1 : 0.6, crit ? 2.0 : 1.0, 0xffffff, color, (crit ? 2.4 : 1.5) * this.flashK, crit ? Frame.BURST : Frame.FLARE, 1, 0, 0, 0, 0, this.r() * 6.28);
+    // only a handful of crits per frame get the full starburst (a Dawnbreak pulse can crit dozens at once)
+    if (crit && this.critBudget-- <= 0) crit = false;
+    if (crit || this.hitBudget > 20) ps.emit(ix, y, iz, 0, 0, 0, crit ? 0.14 : 0.08, crit ? 1.1 : 0.6, crit ? 2.0 : 1.0, 0xffffff, color, (crit ? 2.0 : 1.3) * this.flashK, crit ? Frame.BURST : Frame.FLARE, 1, 0, 0, 0, 0, this.r() * 6.28);
     if (cheap && !crit) return;
     const n = crit ? 12 : 4;
     for (let i = 0; i < n; i++) {
@@ -290,8 +450,8 @@ export class FxManager {
       ps.emit(ix, y, iz, sx * sp, 1.5 + this.r() * 4, sz * sp, 0.18 + this.r() * 0.16, 0.16, 0.06, 0xffffff, color, 3.2, Frame.STREAK, 1, -18, 2.5, 0.04, PF_BOUNCE);
     }
     if (crit) {
-      this.ground.add(GM_SHOCK, x, z, 0.3 * scale, 1.7 * scale, 0.26, 0xffd04a, 1.6, 0.1);
-      ps.emit(ix, y + 0.2, iz, 0, 0, 0, 0.22, 0.5, 1.8, 0xfff6c0, 0xffb030, 2.2 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r() * 0.6, 0);
+      this.ground.add(GM_SHOCK, x, z, 0.3 * scale, 1.7 * scale, 0.26, 0xfff0d8, 1.3, 0.1);
+      ps.emit(ix, y + 0.2, iz, 0, 0, 0, 0.22, 0.5, 1.8, 0xffffff, 0xffc890, 1.8 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r() * 0.6, 0);
     }
   }
 
@@ -303,12 +463,20 @@ export class FxManager {
     const ps = this.particles;
     const y = 0.8 * scale;
     const k = tier === 2 ? 5 : tier === 1 ? 2.2 : 1;
+    // mass kills (a pulse clearing a pack): past the per-frame budget a death is just smoke, ash and a soul wisp,
+    // so 60 simultaneous deaths don't stack 60 core flashes + ground splashes into a white disc
+    if (tier === 0 && this.deathBudget-- <= 0) {
+      ps.emit(x, y, z, 0, 0, 0, 0.1, 0.5 * scale, 1.1 * scale, 0xfff0e0, color, 0.8 * this.flashK, Frame.CORE, 1);
+      ps.emit(x, y, z, (this.r() - 0.5) * 0.6, 2.2, (this.r() - 0.5) * 0.6, 0.9, 0.6 * scale, 1.0 * scale, color, 0x6a4aff, 1.0, Frame.WISP, 1, 0.6, 0.8, 0, PF_FLICKER, 0, 0, 0, 0.15);
+      if (ps.pressure < 0.8) ps.emit(x, y * 0.8, z, 0, 0.8, 0, 0.8, 0.7 * scale, 1.8 * scale, 0x4a4060, 0x1c1826, 1, Frame.SMOKE, 0, 0.3, 1.6, 0, PF_SOFTFADE, this.r() * 6.28, 0, 0, 0.12);
+      return;
+    }
     const room = 1 - ps.pressure * 0.75;
     // core flash
-    ps.emit(x, y, z, 0, 0, 0, 0.14 * Math.sqrt(k), 0.9 * scale, 2.0 * scale, 0xffffff, color, 2.2 * this.flashK, Frame.CORE, 1);
-    // ground light splash (fake light)
-    this.ground.add(GM_GLOW, x, z, 1.2 * scale, 2.0 * scale * Math.sqrt(k), 0.28 * Math.sqrt(k), color, 0.5);
-    this.ground.add(GM_SHOCK, x, z, 0.3 * scale, 1.6 * scale * Math.sqrt(k), 0.3, color, 1.4, 0.1 * scale);
+    ps.emit(x, y, z, 0, 0, 0, 0.14 * Math.sqrt(k), 0.9 * scale, 2.0 * scale, 0xffffff, color, 1.8 * this.flashK, Frame.CORE, 1);
+    // ground light splash (fake light) — a ring, plus a soft pool only for elites / bosses
+    if (tier > 0) this.ground.add(GM_GLOW, x, z, 1.2 * scale, 2.0 * scale * Math.sqrt(k), 0.28 * Math.sqrt(k), color, 0.45);
+    this.ground.add(GM_SHOCK, x, z, 0.3 * scale, 1.6 * scale * Math.sqrt(k), 0.3, color, 1.2, 0.1 * scale);
     // spark burst
     const sparks = Math.ceil(10 * k * room);
     for (let i = 0; i < sparks; i++) {
@@ -403,11 +571,11 @@ export class FxManager {
   /** Flare Nova: crisp shockwave + inner heat band + blinding flash + rising sparks + radial ground sparks. */
   shockwave(x: number, z: number, radius: number, color = 0xffd27a): void {
     const ps = this.particles;
-    this.ground.add(GM_SHOCK, x, z, 0.4, radius, 0.42, color, 2.2, Math.max(0.16, radius * 0.05));
-    this.ground.add(GM_SHOCK, x, z, 0.2, radius * 0.75, 0.32, 0xffffff, 1.2, 0.1, 0.04);
-    this.ground.add(GM_GLOW, x, z, radius * 0.5, radius * 0.9, 0.3, color, 0.35);
-    // core flash: capped so a huge pulse never whites out the player standing in its centre
-    ps.emit(x, 1.2, z, 0, 0, 0, 0.12, 1.2, Math.min(2.4, radius * 0.45), 0xffffff, color, 1.3 * this.flashK, Frame.CORE, 1);
+    // AoE reads as rings (no disc fill): a crisp wavefront and a thinner white echo inside it
+    this.ground.add(GM_SHOCK, x, z, 0.4, radius, 0.42, color, 2.0, Math.min(0.5, Math.max(0.16, radius * 0.05)));
+    this.ground.add(GM_SHOCK, x, z, 0.2, radius * 0.75, 0.32, 0xffffff, 1.0, 0.1, 0.04);
+    // core flash: small and capped so a huge pulse never whites out the player standing in its centre
+    ps.emit(x, 1.2, z, 0, 0, 0, 0.1, 0.8, Math.min(1.4, radius * 0.3), 0xffffff, color, 0.8 * this.flashK, Frame.CORE, 1);
     const n = Math.ceil(40 * (1 - ps.pressure * 0.7));
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + this.r() * 0.15;
@@ -419,7 +587,7 @@ export class FxManager {
       const rr = this.r() * radius;
       ps.emit(x + Math.cos(a) * rr, 0.2, z + Math.sin(a) * rr, 0, 2.5 + this.r() * 3, 0, 0.6 + this.r() * 0.4, 0.22, 0.06, 0xfff4d0, color, 2.8, Frame.GLOW, 1, 1, 1, 0.04, PF_FLICKER, 0, 0, this.r() * 0.15);
     }
-    this.light(x, 1.5, z, color, 22, radius * 2.2, 0.3);
+    this.light(x, 1.5, z, color, 10, radius * 1.8, 0.25);
   }
 
   /** Level-up: radiant column of light, rune circle, shockwave and rising stars. Animates on real time (game is paused). */
@@ -460,7 +628,7 @@ export class FxManager {
       const sp = 4 + this.r() * 6;
       ps.emit(bx, by, bz, Math.cos(a) * sp, 2 + this.r() * 4, Math.sin(a) * sp, 0.2 + this.r() * 0.15, 0.1, 0.04, 0xffffff, color, 2.6, Frame.STREAK, 1, -10, 2, 0.04);
     }
-    this.ground.add(GM_GLOW, bx, bz, 0.9, 1.3, 0.2, color, 0.5);
+    this.ground.add(GM_GLOW, bx, bz, 0.7, 1.0, 0.2, color, 0.3);
   }
 
   /** Animated fire pool (visual only) — see vfx/FirePools. */
@@ -480,7 +648,7 @@ export class FxManager {
   /** Bright flash sprite + ground splash (+ optional real light). */
   flash(x: number, y: number, z: number, color: number, size = 2, intensity = 3, withLight = false): void {
     this.particles.emit(x, y, z, 0, 0, 0, 0.12, size * 0.4, size * 0.8, 0xffffff, color, intensity * 0.6 * this.flashK, Frame.CORE, 1);
-    this.ground.add(GM_GLOW, x, z, size * 0.5, size * 0.8, 0.22, color, 0.5);
+    this.ground.add(GM_GLOW, x, z, size * 0.5, size * 0.8, 0.22, color, 0.35);
     if (withLight) this.light(x, y + 0.5, z, color, 30, size * 4, 0.25);
   }
 
@@ -592,6 +760,7 @@ export class FxManager {
     this.fz0 = z;
     this.fire.focusX = x;
     this.fire.focusZ = z;
+    setFocusPoint(x, z);
   }
 
   /** Squared distance from the player (see setFocus). */
@@ -609,7 +778,7 @@ export class FxManager {
 
   /** Brief real point-light flash from a small pool (steals the most-faded light). */
   light(x: number, y: number, z: number, color: number, intensity: number, distance: number, duration: number): void {
-    intensity *= this.flashK;
+    intensity *= this.flashK * this.gain;
     let best = 0;
     let bestLeft = Infinity;
     for (let i = 0; i < LIGHTS; i++) {
@@ -818,9 +987,8 @@ export class FxManager {
   /** Sunspear impact: a golden starburst, shock ring and flame licks. */
   sunBurst(x: number, z: number, r: number): void {
     const ps = this.particles;
-    this.ground.add(GM_SHOCK, x, z, 0.2, r, 0.24, 0xffe08a, 1.6, 0.12);
-    this.ground.add(GM_GLOW, x, z, r * 0.5, r, 0.3, 0xffb040, 0.3);
-    ps.emit(x, 1, z, 0, 0, 0, 0.16, 0.5, r, 0xffffff, 0xffd27a, 1.4 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r() * 6);
+    this.ground.add(GM_SHOCK, x, z, 0.2, r, 0.24, 0xffe08a, 1.5, 0.12);
+    ps.emit(x, 1, z, 0, 0, 0, 0.16, 0.5, Math.min(1.6, r), 0xffffff, 0xffd27a, 1.2 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r() * 6);
     if (ps.pressure > 0.8) return;
     for (let i = 0; i < 6; i++) {
       const a = this.r() * Math.PI * 2;
@@ -838,8 +1006,8 @@ export class FxManager {
 
   /** Dawnbreak anticipation (every frame in the last ~0.35 s before a pulse; p = 0 → 1): light gathers inward. */
   dawnGather(x: number, z: number, r: number, p: number): void {
-    this.groundGlow(x, z, 2 * (r * (1 - p * 0.8) + 0.6), 0xffe0a0, 0.35 + 1.1 * p, Frame.RING, p * 2);
-    this.groundGlow(x, z, 3 + 2 * p, 0xffd27a, 0.25 + 0.4 * p);
+    this.groundGlow(x, z, 2 * (r * (1 - p * 0.7) + 0.6), 0xffe0a0, 0.3 + 0.6 * p, Frame.RING, p * 2);
+    if (this.flashK < 1) return;
     const ps = this.particles;
     if (this.r() < 0.7 && ps.pressure < 0.85) {
       const a = this.r() * Math.PI * 2;
@@ -848,20 +1016,26 @@ export class FxManager {
     }
   }
 
-  /** Dawnbreak pulse: a sunrise ring with ground sun-rays and a rune that lingers (echo = the softer second pulse). */
+  /**
+   * Dawnbreak pulse (echo = the softer second pulse). Photosensitivity-safe by construction (art review s2 #3.3):
+   * one crisp sunrise ring ≤ DAWN_RING m wide that starts outside the bearer, thin ground sun-ray strokes and a faint
+   * lingering rune — no disc fill, no core flash, a small real light. Peak additive inside 3 m stays ≤ ~0.5 (focus
+   * protection does the rest). Reduced flashing: the ring only.
+   */
   dawnPulse(x: number, z: number, r: number, echo: boolean): void {
-    this.shockwave(x, z, r, echo ? 0xfff6d8 : 0xffd890);
     const ps = this.particles;
-    if (!echo) {
-      this.ground.add(GM_RUNE, x, z, 1.4, 3.2, 1.0, 0xffd27a, 1.6, 0.12);
-      this.ground.add(GM_GLOW, x, z, r * 0.3, r * 0.6, 0.6, 0xffb040, 0.4);
-    }
-    const n = Math.ceil((echo ? 10 : 18) * (1 - ps.pressure * 0.7));
+    const k = echo ? 0.6 : 1;
+    const c = echo ? 0xfff0c8 : 0xffd890;
+    this.ground.add(GM_SHOCK, x, z, Math.min(2.2, r * 0.3), r, 0.45, c, 1.7 * k, DAWN_RING * 0.35);
+    if (this.flashK < 1) return;
+    if (!echo) this.ground.add(GM_RUNE, x, z, 1.6, 3.0, 0.8, 0xffd27a, 0.55, 0.08);
+    const n = Math.ceil((echo ? 10 : 16) * (1 - ps.pressure * 0.7));
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
       const sp = r * 3.2;
-      ps.emit(x + Math.cos(a) * 1.2, 0.3, z + Math.sin(a) * 1.2, Math.cos(a) * sp, 0, Math.sin(a) * sp, 0.3, 0.55, 0.2, 0xffffff, 0xffd27a, 2.6, Frame.STREAK, 1, 0, 3, 0.09);
+      ps.emit(x + Math.cos(a) * 2.2, 0.25, z + Math.sin(a) * 2.2, Math.cos(a) * sp, 0, Math.sin(a) * sp, 0.28, 0.24, 0.1, 0xfff4d8, 0xffc860, 1.6 * k, Frame.STREAK, 1, 0, 3, 0.08);
     }
+    this.light(x, 1.5, z, 0xffd27a, 6 * k, r * 1.5, 0.22);
   }
 
   /** Tempest Choir: a bolt from the sky onto the first target of a storm. */
@@ -869,8 +1043,8 @@ export class FxManager {
     const jx = (this.r() - 0.5) * 3, jz = (this.r() - 0.5) * 3;
     this.lightning(x + jx, 12, z + jz, x, 0.9, z, 0xfff4d0, 0.55, 0.3);
     this.ground.add(GM_SHOCK, x, z, 0.3, 2.6, 0.3, 0xc0e8ff, 2.2, 0.12);
-    this.ground.add(GM_GLOW, x, z, 1.2, 2.4, 0.35, 0xc0e8ff, 0.6);
-    this.light(x, 2, z, 0xc0e8ff, 24, 10, 0.25);
+    this.ground.add(GM_GLOW, x, z, 1.0, 2.0, 0.3, 0xc0e8ff, 0.35);
+    this.light(x, 2, z, 0xc0e8ff, 16, 8, 0.2);
   }
 
   /** Stunned by the storm: a couple of sparkles over the target's head. */
@@ -934,6 +1108,8 @@ export class FxManager {
     this.lastReal = now;
     this.time += realDt;
     this.hitBudget = 28;
+    this.critBudget = 6;
+    this.deathBudget = 10;
     // no glow() call since the last simulated frame → the owners stopped drawing: drop the stale set
     if (dt > 0 && this.immFresh) {
       this.immCount = 0;
@@ -949,14 +1125,25 @@ export class FxManager {
       this.ground.flashEnd = reduced ? 1 : 1.6;
     }
 
-    // brightness governor: when the screen fills with additive light (hundreds of hits, stacked evolutions),
-    // every additive layer is scaled down a little so the scene never washes out to white
-    const load = this.particles.pressure * 0.7 + Math.min(1, this.immCount / 300) * 0.3;
-    const gainT = 1 - 0.4 * Math.min(1, Math.max(0, (load - 0.2) / 0.5));
-    this.gain += (gainT - this.gain) * Math.min(1, realDt * 4);
+    // brightness governor: when the screen fills with additive light (hundreds of hits, stacked evolutions,
+    // beams, rings and pools) every additive layer is scaled down so the scene never washes out to white.
+    // Input = last frame's additive energy of every layer (particles, ground decals, fire pools, immediate glows /
+    // shafts, strips), each normalised by what a busy-but-readable mid-game frame emits.
+    const load =
+      this.particles.energy / GOV_PARTICLES +
+      this.ground.energy / GOV_GROUND +
+      this.immEnergy / GOV_IMM +
+      this.strips.energy / GOV_STRIPS +
+      this.fire.liveCount / GOV_FIRE;
+    this.load = load;
+    const gainT = 1 - (1 - GAIN_FLOOR) * Math.min(1, Math.max(0, (load - GOV_KNEE) / GOV_RANGE));
+    // falls fast (a burst must not white out the first frames), recovers slowly
+    const gdt = Math.max(dt, realDt);
+    this.gain += (gainT - this.gain) * Math.min(1, gdt * (gainT < this.gain ? 10 : 2.5));
     this.particles.gain = this.gain;
     this.ground.gain = this.gain;
     this.fire.gain = this.gain;
+    this.strips.uniforms.uGain.value = this.gain;
     this.fire.update(dt, this.particles);
     this.particles.update(dt, realDt);
     this.ground.update(dt, realDt);
@@ -989,19 +1176,24 @@ export class FxManager {
       // shoots up fast, widens slightly, fades
       const grow = Math.min(1, t * 6);
       const env = Math.min(1, t * 10) * (1 - t) * (1 - t);
-      b.column(c[o], c[o + 1], c[o + 2], c[o + 3] * (0.6 + 0.5 * grow), c[o + 4] * (0.3 + 0.7 * grow), c[o + 5], c[o + 6], env);
+      // level-up / evolution pillars stand on the bearer and keep shining after the pause: governed + focus-dimmed
+      b.column(c[o], c[o + 1], c[o + 2], c[o + 3] * (0.6 + 0.5 * grow), c[o + 4] * (0.3 + 0.7 * grow), c[o + 5], c[o + 6] * this.gain, env);
       i++;
     }
     const m = this.imm;
+    let immE = 0;
     for (let j = 0; j < this.immCount; j++) {
       const o = j * IMM_F;
       const kind = m[o + 8];
+      const sz = m[o + 3];
+      immE += m[o + 6] * m[o + 9] * (kind === IK_COLUMN ? sz * m[o + 7] * 0.4 : kind === IK_GROUND ? sz * sz * 0.35 : sz * sz);
       const g = m[o + 6] * this.gain;
       if (kind === IK_GLOW) b.add(m[o], m[o + 1], m[o + 2], m[o + 3], m[o + 4], m[o + 5], g, m[o + 9], m[o + 7]);
       else if (kind === IK_GROUND) b.ground(m[o], m[o + 1], m[o + 2], m[o + 3], m[o + 4], m[o + 5], g, m[o + 9], m[o + 7]);
       else b.column(m[o], m[o + 1], m[o + 2], m[o + 3], m[o + 7], m[o + 5], g, m[o + 9]);
     }
     b.end();
+    this.immEnergy = immE;
     // glows queued during this sim step are consumed; while paused (dt = 0) keep showing the last set
     if (dt > 0) this.immFresh = true;
 
@@ -1016,6 +1208,17 @@ export class FxManager {
     }
 
     this.updateTexts(dt);
+    this.updateBanner(realDt);
+  }
+
+  /** Brightness-governor gain this frame (1 = calm … GAIN_FLOOR = saturated). Renderer can drive bloom with it. */
+  get brightness(): number {
+    return this.gain;
+  }
+
+  /** Governor input (normalised on-screen additive light; ~1 = a busy mid-game frame). */
+  get lightLoad(): number {
+    return this.load;
   }
 
   private updateTexts(dt: number): void {
@@ -1025,8 +1228,10 @@ export class FxManager {
     for (const t of this.texts) {
       if (!t.active) continue;
       t.age += dt;
+      t.since += dt;
       if (t.age >= t.life) {
         t.active = false;
+        if (t.dmg) this.activeNums--;
         t.el.style.display = 'none';
         continue;
       }
@@ -1052,7 +1257,7 @@ export class FxManager {
       const left = t.life - a;
       if (left < 0.2) s *= 0.7 + 1.5 * left;
       t.el.style.transform = `translate3d(${sx.toFixed(1)}px,${sy.toFixed(1)}px,0) translate(-50%,-50%) scale(${s.toFixed(3)})`;
-      t.el.style.opacity = left < 0.25 ? (left * 4).toFixed(2) : '1';
+      t.el.style.opacity = (t.alpha * (left < 0.25 ? left * 4 : 1)).toFixed(2);
     }
   }
 
@@ -1077,6 +1282,10 @@ export class FxManager {
       t.active = false;
       t.el.style.display = 'none';
     }
+    this.activeNums = 0;
+    this.bannerQ.length = 0;
+    this.bannerT = -1;
+    if (this.bannerEl) this.bannerEl.style.opacity = '0';
   }
 }
 

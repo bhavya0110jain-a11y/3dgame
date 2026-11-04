@@ -66,14 +66,23 @@ function styleFor(p: Projectile): number {
   }
 }
 
-/** Hostile palette: warm enemy colours are pushed to violet so enemy shots never read as the player's fire. */
+/**
+ * Hostile palette: every enemy shot is the same hot magenta with a dark rim (see projectileVisuals VOID), a hue no
+ * friendly projectile uses (theirs are warm amber/gold, ice blue or moon violet), so "dodge this" reads instantly.
+ * The caster's own colour survives only as a faint tint (cool casters lean violet, warm ones lean rose).
+ */
+export const HOSTILE_COLOR = 0xff3df0;
 function hostileColor(c: number): number {
   tmpC.setHex(c).getHSL(hsl);
   const h = hsl.h * 360;
-  if (h < 70 || h > 330) return 0xc04dff;
-  return c;
+  // ±8° of hue around #ff3df0 (≈ 304°) — still unmistakably the hostile magenta
+  const lean = h > 180 && h < 300 ? -0.022 : 0.012;
+  tmpC.setHex(HOSTILE_COLOR).offsetHSL(lean, 0, 0);
+  return tmpC.getHex();
 }
 
+/** Squared distance from the bearer inside which friendly projectiles emit no trail particles. */
+const TRAIL_CLEAR2 = 1.6 * 1.6;
 const tmpM = new THREE.Matrix4();
 const tmpC = new THREE.Color();
 const hsl = { h: 0, s: 0, l: 0 };
@@ -117,25 +126,24 @@ export class ProjectileManager {
     if (this.list.length >= this.capacity) return null;
     const p = this.free.pop() ?? ({ hit: new Set<number>() } as Projectile);
     p.hit.clear();
-    Object.assign(p, {
-      active: true,
-      y: 1.0,
-      pierce: 0,
-      life: 2,
-      radius: 0.25,
-      color: 0xffb347,
-      scale: 1,
-      hostile: false,
-      source: 'unknown',
-      knockback: 2,
-      homing: 0,
-      trail: 0.5,
-      bounces: 0,
-      onHit: undefined,
-      onExpire: undefined,
-      vfx: 'auto',
-      ...s,
-    });
+    // defaults field-by-field, then the caller's fields (no merged temporary object per shot)
+    p.active = true;
+    p.y = 1.0;
+    p.pierce = 0;
+    p.life = 2;
+    p.radius = 0.25;
+    p.color = 0xffb347;
+    p.scale = 1;
+    p.hostile = false;
+    p.source = 'unknown';
+    p.knockback = 2;
+    p.homing = 0;
+    p.trail = 0.5;
+    p.bounces = 0;
+    p.onHit = undefined;
+    p.onExpire = undefined;
+    p.vfx = 'auto';
+    Object.assign(p, s);
     p.seed = Math.random();
     p.styleIdx = styleFor(p);
     this.list.push(p);
@@ -165,6 +173,9 @@ export class ProjectileManager {
     const fx = ctx.fx;
     this.fxRef = fx;
     fx.setFocus(player.x, player.z);
+    const gain = fx.brightness ?? 1;
+    this.bb.uniforms.uGain.value = gain;
+    (this.shards.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.6 * gain;
     this.time += dt;
     const ps = fx.particles;
     const room = 1 - ps.pressure;
@@ -194,7 +205,9 @@ export class ProjectileManager {
       }
       p.x += p.vx * dt;
       p.z += p.vz * dt;
-      if (dt > 0) this.emitTrail(p, dt, ctx, room);
+      // friendly trails start ~1.6 m out: dozens of shots leaving the lantern at once must not pile their trails
+      // (frost puffs, embers, sparkles) into a bright blot on the bearer
+      if (dt > 0 && (p.hostile || (p.x - player.x) ** 2 + (p.z - player.z) ** 2 > TRAIL_CLEAR2)) this.emitTrail(p, dt, ctx, room);
 
       if (p.hostile) {
         const dx = player.x - p.x;
@@ -266,7 +279,7 @@ export class ProjectileManager {
           ps.emit(x + (ps.rand() - 0.5) * 0.2, p.y + (ps.rand() - 0.5) * 0.2, z + (ps.rand() - 0.5) * 0.2, (ps.rand() - 0.5) * 2, 0.5 + ps.rand() * 2, (ps.rand() - 0.5) * 2, 0.18 + ps.rand() * 0.15, 0.2 * Math.min(sc, 1.3), 0.04, 0xffffff, p.color, 2.6, Frame.SPARKLE, 1, -2, 2, 0, PF_FLICKER, ps.rand() * 6);
           break;
         case V_SHARD:
-          if (ps.rand() < 0.5) fx.frostPuff(x, p.y, z, 1, 0.35 * sc);
+          if (ps.rand() < 0.3) fx.frostPuff(x, p.y, z, 1, 0.3 * sc);
           else ps.emit(x, p.y, z, (ps.rand() - 0.5), (ps.rand() - 0.5), (ps.rand() - 0.5), 0.3, 0.22, 0.05, 0xffffff, 0x9ae8ff, 3, Frame.SPARKLE, 1, -2, 1, 0, PF_FLICKER, ps.rand() * 6);
           break;
         case V_HOSTILE:

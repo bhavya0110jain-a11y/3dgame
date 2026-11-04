@@ -90,6 +90,9 @@ vi.mock('../../src/entities/Player', async () => {
     light = new THREE.PointLight();
     lightColor = new THREE.Color();
     setRobeColor = noop;
+    /** S3 world-look: Game.updateCamera toggles the x-ray silhouette (no-op here). */
+    xray: boolean | null = null;
+    setXray(on: boolean) { this.xray = on; }
     reset(max: number) { this.lightValue = max; this.dead = false; this.invuln = 0; this.x = this.z = 0; this.group.visible = true; }
     update(dt: number) { if (this.invuln > 0) this.invuln -= dt; }
     lightFrac(max: number) { return Math.max(0, Math.min(1, this.lightValue / max)); }
@@ -613,5 +616,116 @@ describe('Game S2 QA: settings', () => {
     game.save.settings.musicVolume = 0.2;
     game.applySettings();
     expect(calls).toBe(0);
+  });
+});
+
+// ------------------------------------------------------------------ Sprint 3 (gameplay agent)
+describe('Game S3: boss collapse outro, banish shift, announcements', () => {
+  const advance = (game: Priv, seconds: number) => {
+    game.debug.timeScale = seconds / 0.05;
+    internals(game).last = performance.now() - 1000;
+    tick(game);
+    game.debug.timeScale = 1;
+  };
+  const killRealBoss = (game: Priv) => {
+    const boss = game.enemies.spawn('boss_hollow_stag', 0, -18, {})!;
+    expect(game.enemies.boss).toBe(boss);
+    game.enemies.kill(boss, game);
+  };
+
+  it('realBossKilled_dawnTimerFiresDuringOutro_waitsForCollapseThenOpens', () => {
+    // Arrange
+    const game = newGame();
+    killRealBoss(game);
+    // Act: the 2.2 s real-time timer fires with no game time simulated (e.g. a hitch / pause)
+    vi.advanceTimersByTime(2300);
+    // Assert: the collapse has not played yet → still playing
+    expect(game.state).toBe('playing');
+    for (let i = 0; i < 3; i++) advance(game, 1.5); // slow-mo frames simulate 0.35× of that
+    expect(game.state).toBe('levelup');
+    expect(game.levelMode).toBe('dawn');
+  });
+
+  it('realBossKilled_levelUpPending_deferredUntilOutroEnds', () => {
+    const game = newGame();
+    killRealBoss(game);
+    game.run.addXp(game.run.xpToNext);
+    tick(game);
+    expect(game.state).toBe('playing'); // the collapse keeps playing
+    for (let i = 0; i < 3; i++) advance(game, 1.5);
+    expect(game.state).toBe('levelup');
+    expect(game.levelMode).toBe('levelup');
+  });
+
+  it('realBossKilled_firstFrames_runInSlowMotion', () => {
+    const game = newGame();
+    killRealBoss(game);
+    const before = game.run.elapsed;
+    internals(game).last = performance.now() - 50; // one 0.05 s real frame
+    tick(game);
+    expect(game.run.elapsed - before).toBeLessThan(0.03);
+  });
+
+  it('shiftDigitTap_shiftReleasedBeforeFrame_banishesInsteadOfChoosing', () => {
+    const game = newGame();
+    game.run.addXp(game.run.xpToNext);
+    tick(game);
+    const banishes = game.run.banishes;
+    const inp = internals(game).input as { pressedNow: Set<string>; pressedWithShift?: (c: string) => boolean };
+    inp.pressedWithShift = (c) => c === 'Digit1';
+    press(game, 'Digit1');
+    expect(game.state).toBe('levelup');
+    expect(game.run.banishes).toBe(banishes - 1);
+  });
+
+  it('eliteSpawned_routedThroughUiAnnounce', () => {
+    const game = newGame();
+    game.run.elapsed = 74.9;
+    advance(game, 0.3);
+    expect(internals(game).ui.calls).toContain('announce');
+  });
+});
+
+// ------------------------------------------------------------------ Sprint 3 QA pass
+describe('Game S3 QA: outro under pause, x-ray toggle', () => {
+  const advance = (game: Priv, seconds: number) => {
+    game.debug.timeScale = seconds / 0.05;
+    internals(game).last = performance.now() - 1000;
+    tick(game);
+    game.debug.timeScale = 1;
+  };
+
+  it('realBossKilled_pausedThroughDawnTimer_noDawnUntilResumedAndOutroPlayed', () => {
+    // Arrange: kill the night's master, pause immediately
+    const game = newGame();
+    const boss = game.enemies.spawn('boss_hollow_stag', 0, -18, {})!;
+    game.enemies.kill(boss, game);
+    game.togglePause();
+    // Act: the 2.2 s dawn timer fires while paused, and paused frames go by
+    vi.advanceTimersByTime(2300);
+    for (let i = 0; i < 5; i++) advance(game, 1.5);
+    // Assert: still paused, no dawn choice behind the pause menu
+    expect(game.state).toBe('paused');
+    // resume: the collapse outro plays first, then the dawn opens
+    game.togglePause();
+    tick(game);
+    expect(game.state).toBe('playing');
+    for (let i = 0; i < 3; i++) advance(game, 1.5);
+    expect(game.state).toBe('levelup');
+    expect(game.levelMode).toBe('dawn');
+  });
+
+  it('updateCamera_inRunAndOnMenu_xraySilhouetteFollowsState', () => {
+    // Arrange
+    const game = newGame();
+    const player = game.player as unknown as { xray: boolean | null };
+    // Act
+    tick(game);
+    const inRun = player.xray;
+    game.toMenu();
+    tick(game);
+    // Assert
+    expect(inRun).toBe(true);
+    expect(player.xray).toBe(false);
   });
 });

@@ -16,6 +16,10 @@ const CLEAR2 = 1.5 * 1.5;
 export class FirePools {
   private d: Float32Array;
   private count = 0;
+  /** Live fire pools (brightness-governor input). */
+  get liveCount(): number {
+    return this.count;
+  }
   private geo: THREE.InstancedBufferGeometry;
   private aA: THREE.InstancedBufferAttribute;
   private mat: THREE.ShaderMaterial;

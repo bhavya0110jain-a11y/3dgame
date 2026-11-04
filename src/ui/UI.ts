@@ -13,6 +13,7 @@ import { RUN_LENGTH } from '../game/Director';
 import { ENEMIES } from '../data/enemies';
 import { getWeapon } from '../data/weapons';
 import { baseStats } from '../game/Stats';
+import { HINT_LOW_LIGHT } from '../data/tutorial';
 
 // ---------------------------------------------------------------- optional data (feature-detected, never breaks the build)
 interface AchLike {
@@ -34,6 +35,52 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''):
 
 const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
+/** Own glyph per evolved weapon (the data keeps the base weapon's icon, so Sunspear Volley ≠ Ember Bolt only here). */
+const EVO_GLYPH: Record<string, string> = {
+  sunspear_volley: 'evo-sunspear', solar_crown: 'evo-crown', dawnbreak: 'evo-dawn', tempest_choir: 'evo-tempest',
+  beacon_ray: 'evo-beacon', pyre_garden: 'evo-pyre', glacier_heart: 'evo-glacier',
+};
+/** Glyph for a weapon id: an evolved weapon's own glyph, else the def's icon. */
+export function weaponGlyph(id: string, fallback: string): string {
+  return EVO_GLYPH[id] ?? fallback;
+}
+/** True for evolved (hidden) weapons. */
+function isEvolvedWeapon(id: string): boolean {
+  return id in EVO_GLYPH || !!getWeapon(id)?.hidden;
+}
+/** Inline CSS vars that tint a badge from a weapon colour: --wc fill, --wi icon ink (dark ink on pale colours). */
+export function weaponTint(color: number): string {
+  const r = (color >> 16) & 255;
+  const g = (color >> 8) & 255;
+  const b = color & 255;
+  const luma = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return `--wc:${hex(color)};--wi:${luma > 0.72 ? '#2a1650' : '#fff'}`;
+}
+/** Evolution copy: the ribbon/title already say "evolved", so the data's "EVOLVED · " prefix is dropped on screen. */
+export const stripEvolved = (s: string): string => s.replace(/^\s*EVOLVED\s*[·:\-–—]\s*/i, '');
+/** Small crown pinned to an evolved weapon's badge / slot. */
+const EVO_CROWN = `<span class="evo-crown" aria-hidden="true">${icon('crown')}</span>`;
+
+/** Kind of a world announcement banner (UI.announce); picks the accent and glyph. */
+export type AnnounceKind = 'info' | 'elite' | 'boss' | 'danger' | 'buff';
+const ANNOUNCE_KINDS: readonly AnnounceKind[] = ['info', 'elite', 'boss', 'danger', 'buff'];
+const ANNOUNCE_GLYPH: Record<AnnounceKind, string> = { info: 'sparkle', elite: 'skull', boss: 'crown', danger: 'warning', buff: 'wick' };
+/** Seconds a banner is on screen; how long a queued banner may wait (behind a hint card or another banner) before it is dropped. */
+export const ANNOUNCE_TIME = 1.2;
+export const ANNOUNCE_MAX_WAIT = 3;
+const ANNOUNCE_GAP = 0.18;
+const ANNOUNCE_QUEUE = 4;
+/** Best-guess kind for an announcement given without one (Director / Fx strings). */
+export function announceKind(text: string, kind?: string): AnnounceKind {
+  if (kind && (ANNOUNCE_KINDS as readonly string[]).includes(kind)) return kind as AnnounceKind;
+  if (/master|boss|enraged/i.test(text)) return 'boss';
+  if (/elite/i.test(text)) return 'elite';
+  if (/dark closes|swarm|cinders|beware|danger/i.test(text)) return 'danger';
+  if (/rekindl|flare|light returns/i.test(text)) return 'buff';
+  return 'info';
+}
+interface Announcement { text: string; kind: AnnounceKind; wait: number }
+
 export function fmtTime(sec: number): string {
   const s = Math.max(0, Math.floor(sec));
   return `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
@@ -52,7 +99,10 @@ const FIT: Partial<Record<Screen, [string, number]>> = {
   chest: ['.ch-wrap', 0.6],
   dawn: ['.dw-wrap', 0.6],
   pause: ['.pause-frame', 0.62],
+  gameover: ['.go-wrap', 0.6],
 };
+/** Game over: at most this many achievement cards; the rest collapse into a "+N more" line. */
+const GO_MAX_ACH = 3;
 
 /** Structural copy of Game's DawnInfo (feature-detected; the UI never needs Game's type to compile). */
 interface DawnInfoLike { bossId: string; bossName: string; ashIfDawn: number; endlessBossEvery: number; time: number; kills: number; level: number }
@@ -173,6 +223,15 @@ export class UI {
   chestHold = 0;
   private chestBar: HTMLElement | null = null;
   private chestBar0 = 0;
+  // world announcement banners (announce): one at a time under the dawn bar, never over the bearer
+  private annEl: HTMLElement;
+  private annText: HTMLElement;
+  private annGlyph: HTMLElement;
+  private annQ: Announcement[] = [];
+  private annCur: Announcement | null = null;
+  private annT = 0;
+  private annGap = 0;
+  private fxBanner: HTMLElement | null = null;
 
   constructor(private game: Game) {
     this.root = document.getElementById('ui-root')!;
@@ -190,6 +249,12 @@ export class UI {
     this.hintEl.setAttribute('role', 'status');
     this.hintEl.setAttribute('aria-live', 'polite');
     this.root.appendChild(this.hintEl);
+    this.annEl = el('div', 'announce', '<span class="ann-glyph"></span><span class="ann-text"></span>');
+    this.annEl.setAttribute('role', 'status');
+    this.annEl.setAttribute('aria-live', 'polite');
+    this.annText = this.annEl.querySelector('.ann-text')!;
+    this.annGlyph = this.annEl.querySelector('.ann-glyph')!;
+    this.root.appendChild(this.annEl);
     this.buildHud();
 
     // UI sounds: focus changes (mouse hover focuses too, see below) and clicks
@@ -272,6 +337,7 @@ export class UI {
     const dt = Math.min(0.1, (now - (this.lastTick || now)) / 1000);
     this.lastTick = now;
     this.tickHint(dt);
+    this.tickAnnounce(dt);
     if (this.current === 'chest' && this.chestBar) {
       // the drain bar follows Game's live auto-continue countdown when it exposes one (else the CSS animation runs)
       const left = (this.game as unknown as { chestTimeLeft?: number }).chestTimeLeft;
@@ -345,6 +411,7 @@ export class UI {
     this.hud.root.classList.toggle('visible', hudOn);
     this.hud.root.classList.toggle('behind', hudOn && name !== 'hud');
     this.root.classList.toggle('in-run', hudOn);
+    this.root.classList.toggle('boss-up', hudOn && this.hv.bossOn);
     this.root.classList.toggle('overlay-up', name !== 'hud');
     if (name !== 'hud' && name !== 'none') {
       this.fitScreen(name);
@@ -541,6 +608,8 @@ export class UI {
     if (!live) return;
     if (this.hintCur) {
       this.hintLeft -= dt;
+      // a warning the player has already fixed (light refilled) leaves early instead of nagging (BUG-QA-020)
+      if (this.hintLeft > 0.8 && this.hintCur.id === 'lowlight' && this.lightFracNow() > 0.6) this.hintLeft = 0.8;
       if (this.hintLeft <= 0) {
         this.hintCur = null;
         this.hintGap = 0.6;
@@ -550,8 +619,27 @@ export class UI {
     } else if (this.hintGap > 0) {
       this.hintGap -= dt;
     } else if (this.hintQueue.length) {
-      this.showHint(this.hintQueue.shift()!);
+      // a queued hint is re-checked when its turn comes: a stale one is dropped and may fire again later (BUG-QA-020)
+      let next = this.hintQueue.shift();
+      while (next && !this.hintStillValid(next.id)) {
+        this.game.tutorial?.forget?.(next.id);
+        next = this.hintQueue.shift();
+      }
+      if (next) this.showHint(next);
     }
+  }
+
+  /** Current light fraction (1 when no run is live). */
+  private lightFracNow(): number {
+    const g = this.game;
+    const max = g.run?.stats?.maxLight;
+    return g.player && typeof max === 'number' ? g.player.lightFrac(max) : 1;
+  }
+
+  /** Is hint `id` still true about the game right now? (only 'lowlight' can go stale today) */
+  private hintStillValid(id: string): boolean {
+    if (id === 'lowlight') return this.lightFracNow() < HINT_LOW_LIGHT * 1.3;
+    return true;
   }
 
   /** Shows the pending level-up tip in place of the level-up subtitle (once). */
@@ -563,7 +651,77 @@ export class UI {
     this.levelTip = '';
   }
 
+  // ------------------------------------------------------------------ world announcements
+  /**
+   * Queues a world announcement banner ("An elite approaches…", "The dark closes in!"). Banners show one at a time,
+   * ANNOUNCE_TIME s each, at ~22% of the screen height (under the dawn bar; never over the bearer). A banner waits
+   * while an onboarding hint card is up (the card replaces it) and is dropped if it has waited ANNOUNCE_MAX_WAIT s.
+   * Duplicates of the current / a queued text are ignored; 'boss' banners jump the queue. `kind` picks the accent
+   * (info | elite | boss | danger | buff) and is guessed from the text when omitted. Safe to call at any time.
+   */
+  announce(text: string, kind?: AnnounceKind | string): void {
+    if (typeof text !== 'string' || !text.trim()) return;
+    if (this.annCur?.text === text || this.annQ.some((a) => a.text === text)) return;
+    const a: Announcement = { text, kind: announceKind(text, kind), wait: 0 };
+    if (a.kind === 'boss') this.annQ.unshift(a);
+    else this.annQ.push(a);
+    if (this.annQ.length > ANNOUNCE_QUEUE) this.annQ.length = ANNOUNCE_QUEUE;
+  }
+
+  /** Advances the banner queue on real time while the HUD is up (frozen with the game behind a choice screen). */
+  private tickAnnounce(dt: number): void {
+    if (!this.annCur && !this.annQ.length) return;
+    if (this.current !== 'hud') {
+      if (this.annCur) this.endAnnounce();
+      return;
+    }
+    if (this.annCur) {
+      this.annT += dt;
+      // a hint card that pops up mid-banner takes over
+      if (this.annT >= ANNOUNCE_TIME || (this.hintCur && this.annT < ANNOUNCE_TIME - 0.3)) this.endAnnounce();
+      return;
+    }
+    for (let i = this.annQ.length - 1; i >= 0; i--) {
+      this.annQ[i].wait += dt;
+      if (this.annQ[i].wait > ANNOUNCE_MAX_WAIT) this.annQ.splice(i, 1);
+    }
+    if (this.annGap > 0) {
+      this.annGap -= dt;
+      return;
+    }
+    if (!this.annQ.length || this.hintCur || this.fxBannerUp()) return;
+    const a = this.annQ.shift()!;
+    this.annCur = a;
+    this.annT = 0;
+    this.annText.textContent = a.text;
+    this.annGlyph.innerHTML = icon(ANNOUNCE_GLYPH[a.kind]);
+    this.annEl.className = `announce ann-${a.kind}`;
+    void this.annEl.offsetWidth; // restart the pop-in
+    this.annEl.classList.add('visible');
+    this.root.classList.add('announcing');
+  }
+
+  private endAnnounce(): void {
+    this.annCur = null;
+    this.annGap = ANNOUNCE_GAP;
+    this.annEl.classList.remove('visible');
+    this.root.classList.remove('announcing');
+  }
+
+  /** Is the legacy Fx 'ft-big' banner on screen? (feature-detected; the two never overlap) */
+  private fxBannerUp(): boolean {
+    if (!this.fxBanner || !this.fxBanner.isConnected) this.fxBanner = this.fxLayer.querySelector<HTMLElement>('.fx-banner');
+    return !!this.fxBanner && Number(this.fxBanner.style.opacity || 0) > 0.05;
+  }
+
+  private clearAnnouncements(): void {
+    this.annQ.length = 0;
+    if (this.annCur) this.endAnnounce();
+    this.annGap = 0;
+  }
+
   private clearHints(): void {
+    this.clearAnnouncements();
     this.levelTip = '';
     if (!this.hintCur && !this.hintQueue.length) return;
     this.hintCur = null;
@@ -1097,11 +1255,6 @@ export class UI {
         <div class="hud-center">
           <div class="hud-timer">00:00</div>
           <div class="dawn-track" aria-hidden="true"><span class="dt-moon">${icon('moon')}</span><span class="dt-bar"><i class="dt-fill"></i></span><span class="dt-sun">${icon('sun')}</span></div>
-          <div class="boss-bar" aria-live="polite">
-            <div class="boss-plate">${icon('crown')}<span class="boss-name"></span>${icon('crown')}</div>
-            <div class="boss-track"><div class="boss-trail"></div><div class="boss-fill"></div><div class="boss-ticks"></div></div>
-            <div class="boss-sub"></div>
-          </div>
         </div>
         <div class="hud-counters">
           <span class="counter counter-kills">${icon('skull')}<b class="kills-num">0</b></span>
@@ -1115,6 +1268,11 @@ export class UI {
           <div class="light-bar"><div class="light-fill"></div><div class="light-gloss"></div></div>
           <div class="light-num"><b class="light-val">100</b><span class="light-max">/100</span></div>
         </div>
+      </div>
+      <div class="boss-bar" aria-live="polite">
+        <div class="boss-plate">${icon('crown')}<span class="boss-name"></span>${icon('crown')}</div>
+        <div class="boss-track"><div class="boss-trail"></div><div class="boss-fill"></div><div class="boss-ticks"></div></div>
+        <div class="boss-sub"></div>
       </div>
       <div class="hud-fps"></div>`;
     this.root.appendChild(root);
@@ -1161,18 +1319,21 @@ export class UI {
       for (let i = 0; i < max; i++) p += `<i class="${i < lv ? 'on' : ''}"></i>`;
       return `<span class="slot-pips">${p}</span>`;
     };
+    // owned slots plus ONE empty slot per row (until the row is full) — not a grid of holes at run start (art review #19)
     let w = '';
-    for (let i = 0; i < run.maxWeapons; i++) {
+    const nW = Math.min(run.maxWeapons, run.weapons.length + 1);
+    for (let i = 0; i < nW; i++) {
       const x = run.weapons[i];
-      if (!x) { w += '<div class="slot empty"></div>'; continue; }
+      if (!x) { w += `<div class="slot empty" title="${run.weapons.length}/${run.maxWeapons} weapons"></div>`; continue; }
       const isEvo = evo.has(x.def.id) || !!x.def.hidden;
-      w += `<div class="slot weapon ${isEvo ? 'evo' : ''} ${x.level >= x.def.maxLevel ? 'maxed' : ''}" title="${esc(x.def.name)} — Lv ${x.level}" style="--c:${hex(x.def.color)}">${icon(x.def.icon)}${pips(x.level, x.def.maxLevel)}</div>`;
+      w += `<div class="slot weapon ${isEvo ? 'evo' : ''} ${x.level >= x.def.maxLevel ? 'maxed' : ''}" title="${esc(x.def.name)} — Lv ${x.level}" style="--c:${hex(x.def.color)};${weaponTint(x.def.color)}">${icon(weaponGlyph(x.def.id, x.def.icon))}${isEvo ? EVO_CROWN : pips(x.level, x.def.maxLevel)}</div>`;
     }
     let p = '';
     const relics = Array.from(run.passives.entries());
-    for (let i = 0; i < run.maxPassives; i++) {
+    const nP = Math.min(run.maxPassives, relics.length + 1);
+    for (let i = 0; i < nP; i++) {
       const r = relics[i];
-      if (!r) { p += '<div class="slot empty relic-empty"></div>'; continue; }
+      if (!r) { p += `<div class="slot empty relic-empty" title="${relics.length}/${run.maxPassives} relics"></div>`; continue; }
       const def = this.game.passiveDef(r[0]);
       const max = def?.maxLevel ?? 5;
       p += `<div class="slot relic ${r[1] >= max ? 'maxed' : ''}" title="${esc(def?.name ?? r[0])} — Lv ${r[1]}">${icon(def?.icon ?? 'star')}${pips(r[1], max)}</div>`;
@@ -1263,6 +1424,8 @@ export class UI {
       hv.bossOn = bossOn;
       h.bossBar.classList.toggle('visible', bossOn);
       h.root.classList.toggle('has-boss', bossOn);
+      // the bar sits at the bottom centre (never over the boss, who enters from the top): hint cards / toasts lift above it
+      this.root.classList.toggle('boss-up', bossOn);
     }
     if (boss && bossOn) {
       if (boss.def.id !== hv.bossId) {
@@ -1307,20 +1470,22 @@ export class UI {
       pips = `<span class="uc-pips" aria-label="Level ${c.level} of ${max}">${pips}</span>`;
     }
     const wColor = c.kind.startsWith('weapon') || c.kind === 'evolution' ? getWeapon(c.id)?.color : undefined;
+    const evo = c.kind === 'evolution' || ((c.kind === 'weapon-up' || c.kind === 'weapon-new') && isEvolvedWeapon(c.id));
+    const glyph = c.kind.startsWith('weapon') || c.kind === 'evolution' ? weaponGlyph(c.id, c.icon) : c.icon;
     const lvText = c.kind === 'weapon-up' || (c.kind === 'passive' && c.level > 1)
       ? `Lv ${c.level - 1} → ${c.level >= max && max > 0 ? 'MAX' : c.level}`
       : c.kind === 'evolution' && c.from ? `${getWeapon(c.from)?.name ?? ''} →` : '';
     const noBanish = c.kind === 'heal' || c.kind === 'ash' || c.kind === 'special';
-    return `<button class="ucard ${r.cls} ${noBanish ? 'no-banish' : ''}" data-i="${i}" ${i === 0 ? 'data-autofocus' : ''} style="--i:${i}${wColor !== undefined ? `;--wc:${hex(wColor)}` : ''}" ${interactive ? '' : 'tabindex="-1"'}>
+    // the "NEW WEAPON" / "NEW RELIC" ribbon already says it: no separate NEW! sticker (art review #14)
+    return `<button class="ucard ${r.cls} ${noBanish ? 'no-banish' : ''} ${wColor !== undefined ? 'tinted' : ''} ${r.isNew ? 'is-new' : ''}" data-i="${i}" ${i === 0 ? 'data-autofocus' : ''} style="--i:${i}${wColor !== undefined ? `;${weaponTint(wColor)}` : ''}" ${interactive ? '' : 'tabindex="-1"'}>
       <span class="uc-rays" aria-hidden="true"></span>
       <span class="uc-ribbon">${icon(r.shape, 'rar')}${r.label}</span>
-      ${r.isNew ? '<span class="uc-new">NEW!</span>' : ''}
       ${interactive ? `<span class="uc-key"><span class="only-kbd">${kbd(String(i + 1))}</span><span class="only-pad">${pad('A')}</span></span>` : ''}
-      <span class="uc-badge">${icon(c.icon)}</span>
+      <span class="uc-badge">${icon(glyph)}${evo ? EVO_CROWN : ''}</span>
       <span class="uc-name">${c.name}</span>
       ${lvText ? `<span class="uc-lv">${lvText}</span>` : ''}
       ${pips}
-      <span class="uc-desc">${c.description}</span>
+      <span class="uc-desc">${evo ? stripEvolved(c.description) : c.description}</span>
       <span class="uc-banish" aria-hidden="true">${icon(noBanish ? 'lock' : 'banish')} ${noBanish ? 'Cannot banish' : 'Banish'}</span>
     </button>`;
   }
@@ -1429,24 +1594,27 @@ export class UI {
       const lv = c.kind === 'evolution' ? '' : c.level > 0 ? `Lv ${Math.max(0, it.from)} → ${max > 0 && it.to >= max ? 'MAX' : it.to}` : '';
       const fromW = c.kind === 'evolution' && c.from ? getWeapon(c.from) : undefined;
       const delay = (T0 + i * STEP).toFixed(2);
-      return `<div class="ch-item ${r.cls} ${c.kind === 'evolution' ? 'ch-evo' : ''}" style="--d:${delay}s;--n:${i}" data-nav tabindex="-1">
+      const isW = c.kind.startsWith('weapon') || c.kind === 'evolution';
+      const wc = isW ? getWeapon(c.id)?.color : undefined;
+      const evoItem = c.kind === 'evolution';
+      // copy: the title says "Evolution!", so the ribbon names the new form's tier instead of repeating "Evolved"
+      return `<div class="ch-item ${r.cls} ${evoItem ? 'ch-evo' : ''} ${wc !== undefined ? 'tinted' : ''}" style="--d:${delay}s;--n:${i}${wc !== undefined ? `;${weaponTint(wc)}` : ''}" data-nav tabindex="-1">
         <span class="ch-glow" aria-hidden="true"></span>
-        ${c.kind === 'evolution' ? '<span class="uc-rays" aria-hidden="true"></span>' : ''}
-        <span class="uc-ribbon">${icon(r.shape, 'rar')}${c.kind === 'evolution' ? 'Evolved' : r.label}</span>
+        ${evoItem ? '<span class="uc-rays" aria-hidden="true"></span>' : ''}
+        <span class="uc-ribbon">${icon(r.shape, 'rar')}${evoItem ? 'Legendary' : r.label}</span>
         ${it.count > 1 ? `<span class="ch-count">×${it.count}</span>` : ''}
         ${fromW ? `<span class="ch-from"><span class="badge badge-sm badge-tint" style="--c:${hex(fromW.color)}">${icon(fromW.icon)}</span>${icon('next')}</span>` : ''}
-        <span class="uc-badge">${icon(c.icon)}</span>
+        <span class="uc-badge">${icon(isW ? weaponGlyph(c.id, c.icon) : c.icon)}${evoItem ? EVO_CROWN : ''}</span>
         <span class="uc-name">${c.name}</span>
         ${lv ? `<span class="uc-lv">${lv}</span>` : ''}
-        <span class="uc-desc">${c.description}</span>
+        <span class="uc-desc">${evoItem ? stripEvolved(c.description) : c.description}</span>
       </div>`;
     };
     this.screen('chest', (s) => {
       s.classList.toggle('chest-evo', evolved);
       s.style.setProperty('--reveal', `${revealEnd.toFixed(2)}s`);
       const banner = evo
-        ? `<div class="ch-banner" style="--d:${T0.toFixed(2)}s"><span class="ch-banner-ribbon">${icon('sparkle')}<span>${esc(getWeapon(evo.c.from ?? '')?.name ?? '')}</span>${icon('next')}<span>${esc(evo.c.name)}</span>${icon('sparkle')}</span>
-            <span class="ch-banner-sub">Your weapon has evolved</span></div>`
+        ? `<div class="ch-banner" style="--d:${T0.toFixed(2)}s"><span class="ch-banner-ribbon">${icon('sparkle')}<span>${esc(getWeapon(evo.c.from ?? '')?.name ?? '')}</span>${icon('next')}<span>${esc(evo.c.name)}</span>${icon('sparkle')}</span></div>`
         : '';
       s.innerHTML = `
         <div class="lu-burst ch-burst" aria-hidden="true"></div>
@@ -1594,7 +1762,7 @@ export class UI {
             ? `<span class="bi-note ready">${icon('chest')} Ready! Open a reliquary → ${esc(into)}</span>`
             : `<span class="bi-note">${icon('sparkle')} ${max ? `${icon('check')}MAX` : 'MAX'} + <span class="${has ? 'have' : ''}">${has ? icon('check') : ''}${esc(relic?.name ?? d.evolvesWith)}</span> → ${esc(into)}</span>`;
         }
-        return `<div class="build-item ${isEvo ? 'is-evo' : ''}"><span class="badge badge-sm badge-tint" style="--c:${hex(d.color)}">${icon(d.icon)}</span>
+        return `<div class="build-item ${isEvo ? 'is-evo' : ''}"><span class="badge badge-sm badge-tint" style="--c:${hex(d.color)};${weaponTint(d.color)}">${icon(weaponGlyph(d.id, d.icon))}</span>
           <span class="bi-main"><span class="bi-name">${d.name}</span>${note}</span>
           <span class="bi-lv">${max ? '<b class="bi-max">MAX</b>' : `<b>Lv ${w.level}</b>`}${lvPips(w.level, d.maxLevel)}</span></div>`;
       });
@@ -1672,19 +1840,21 @@ export class UI {
     const srcInfo = (id: string): { name: string; ic: string; color: number } => {
       if (id === 'blast') return { name: 'Cinder Blasts', ic: 'fire', color: 0xff7a2a };
       const w = getWeapon(id.replace(/^burn:/, ''));
-      if (w) return { name: w.name, ic: w.icon, color: w.color };
+      if (w) return { name: w.name, ic: weaponGlyph(w.id, w.icon), color: w.color };
       return { name: id.replace(/[_:]/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()), ic: 'star', color: 0xffc76a };
     };
     const dmgRows = dmg.map((d) => {
       const info = srcInfo(d.source);
-      return `<div class="dmg-row" style="--c:${hex(info.color)}"><span class="badge badge-sm badge-tint" style="--c:${hex(info.color)}">${icon(info.ic)}</span>
+      return `<div class="dmg-row" style="--c:${hex(info.color)}"><span class="badge badge-sm badge-tint" style="--c:${hex(info.color)};${weaponTint(info.color)}">${icon(info.ic)}</span>
         <span class="dmg-name">${esc(info.name)}</span>
         <span class="dmg-bar"><i style="transform:scaleX(${(d.damage / top).toFixed(3)})"></i></span>
         <b class="dmg-val">${Math.round(d.damage).toLocaleString()}</b><em>${Math.round(d.share * 100)}%</em></div>`;
     }).join('');
     const all = this.achievements();
     const nextGoal = all?.find((a) => !a.earned && !a.def.secret);
-    const achCards = (achs ?? []).map((a) => `<div class="go-ach"><span class="badge badge-gold">${icon(a.icon)}</span><div><b>${esc(a.name)}</b><small>${a.reward?.label ? esc(a.reward.label) : esc(a.description)}</small></div></div>`).join('');
+    const achShown = (achs ?? []).slice(0, GO_MAX_ACH);
+    const achMore = Math.max(0, (achs?.length ?? 0) - achShown.length);
+    const achCards = achShown.map((a) => `<div class="go-ach"><span class="badge badge-gold">${icon(a.icon)}</span><div><b>${esc(a.name)}</b><small>${a.reward?.label ? esc(a.reward.label) : esc(a.description)}</small></div></div>`).join('');
     const tiles: [string, string, number, string, string][] = [
       ['timer', 'Survived', Math.floor(run.elapsed), 'time', newBest ? 'New best!' : ''],
       ['star', 'Level', run.level, '', ''],
@@ -1709,7 +1879,7 @@ export class UI {
             ${dmgRows ? `<section class="go-card"><h3 class="sect">${icon('fire')} Damage by weapon <span class="sect-right">${Math.round(run.damageDealt).toLocaleString()} total</span></h3><div class="dmg-list">${dmgRows}</div></section>` : ''}
             <section class="go-card">
               <h3 class="sect">${icon('trophy')} This vigil</h3>
-              ${achCards ? `<div class="go-achs">${achCards}</div>` : ''}
+              ${achCards ? `<div class="go-achs">${achCards}${achMore ? `<div class="go-ach-more">${icon('trophy')} +${achMore} more achievement${achMore > 1 ? 's' : ''} — see Achievements</div>` : ''}</div>` : ''}
               ${notes.map((u) => `<div class="unlock-note">${icon('sparkle')} ${esc(u)}</div>`).join('')}
               ${!achCards && !notes.length ? `<p class="frame-sub">No new unlocks this time.</p>` : ''}
               ${nextGoal ? `<div class="next-goal"><small>Next goal</small><div><span class="badge badge-sm badge-dim">${icon(nextGoal.def.icon)}</span><b>${esc(nextGoal.def.name)}</b> — ${esc(nextGoal.def.description)}${nextGoal.def.reward?.label ? ` <em>${esc(nextGoal.def.reward.label)}</em>` : ''}</div></div>` : ''}

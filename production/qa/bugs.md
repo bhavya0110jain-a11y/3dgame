@@ -20,18 +20,26 @@ guard. Every one of them was also run as a plain `it` to confirm it fails for th
 | BUG-QA-006 | S4-Low | P3 | **Fixed (gameplay)** | Core RNG | `Rng` state is never wrapped to uint32 and drifts off mulberry32 after ~4.9M draws |
 | BUG-QA-008 | S4-Low | P3 | **Fixed: Input** · Pickups.spawn requested | Input / Game loop | Small per-frame allocations in the input path (`anyPressed(...codes)`, `gp.buttons.forEach` closure) |
 | BUG-QA-009 | S4-Low | P4 | **Fixed (gameplay)** | Game loop | `debug.timeScale` multiplies the already-clamped dt, so steps above 0.05 s can tunnel projectiles |
-| BUG-QA-010 | S1-Critical | P0 | **Open** · Player.ts owner | Player (`src/entities/Player.ts`) | Bearer model + lantern PointLight stay at the world origin during runs (group.position never synced) |
-| BUG-QA-011 | S3-Medium | P2 | **Open** · Game.ts owner | Game / Settings | Every Settings change (each volume-slider input event) re-applies the quality tier and resets the auto fallback |
-| BUG-QA-012 | S3-Medium | P2 | **Open** · Game.ts owner | Game / Enemies | Enemy horde LOD + moon shadows follow the Settings tier, not the Renderer's automatic fallback |
-| BUG-QA-013 | S3-Medium | P2 | **Open** · Game.ts owner | Game / UI | Reliquary auto-continues after 2.8 s, before a 3–4 item reveal has been readable (ui.chestHold ignored) |
-| BUG-QA-014 | S3-Medium | P3 | **Open** · Renderer owner | Renderer / a11y | Reduce Flashing does not dim the full-screen red damage pulse |
-| BUG-QA-015 | S4-Low | P3 | **Open** · Renderer owner | Renderer | `Renderer.setQuality` still has no unknown-tier guard (BUG-QA-007 belt-and-braces) |
-| BUG-QA-016 | S4-Low | P3 | **Open** · entities owner | Pickups / Enemies | Per-spawn object literals: `PickupManager.spawn` and `EnemyManager.spawn` still `Object.assign(x, {...})` |
-| BUG-QA-017 | S4-Low | P4 | **Open** · Input/Game owner | Input | Shift+1..4 banish reads Shift at frame time; a quick tap released before the next frame picks the card instead |
-| BUG-QA-018 | S3-Medium | P2 | **Open** · UI owner | UI (`src/ui/UI.ts` FIT) | Game-over screen overflows 1280×720 when a run earns several achievements; buttons below the fold |
-| BUG-QA-019 | S4-Low | P3 | **Open** · Director/VFX owner | Director announcements | Simultaneous announcements ('An elite approaches…', 'Cinders on the wind!', boss) draw on top of each other |
-| BUG-QA-020 | S4-Low | P3 | **Open** · gameplay/UI owner | Tutorial | 'Your light is fading' hint is replayed later at 100 % light (stale queued hint) |
-| BUG-QA-021 | S4-Low | P4 | **Open** · render owner | CameraRig | `snap()` before the first `follow()` of a run does not cancel the menu→run swoop (tools/package-screens, smoke) |
+| BUG-QA-010 | S1-Critical | P0 | **Fixed** (verified S3 QA: bearer follows the run in every smoke/explore shot) | Player (`src/entities/Player.ts`) | Bearer model + lantern PointLight stay at the world origin during runs (group.position never synced) |
+| BUG-QA-011 | S3-Medium | P2 | **Fixed** (verified S3 gameplay: `appliedQuality` guard in `applySettings`) | Game / Settings | Every Settings change (each volume-slider input event) re-applies the quality tier and resets the auto fallback |
+| BUG-QA-012 | S3-Medium | P2 | **Fixed** (verified S3 gameplay: `enemies.renderQuality = renderer.effectiveQuality` in `frame()`) | Game / Enemies | Enemy horde LOD + moon shadows follow the Settings tier, not the Renderer's automatic fallback |
+| BUG-QA-013 | S3-Medium | P2 | **Fixed** (verified S3 gameplay: `chestTimer = max(…, ui.chestHold)`) | Game / UI | Reliquary auto-continues after 2.8 s, before a 3–4 item reveal has been readable (ui.chestHold ignored) |
+| BUG-QA-014 | S3-Medium | P3 | **Fixed** (verified S3 QA: `Renderer.render` scales `uDamage` ×0.35 under `a11y-noflash`) | Renderer / a11y | Reduce Flashing does not dim the full-screen red damage pulse |
+| BUG-QA-015 | S4-Low | P3 | **Fixed** (verified S3 QA: `if (!(q in TIERS)) q = 'high'` in `setQuality`) | Renderer | `Renderer.setQuality` still has no unknown-tier guard (BUG-QA-007 belt-and-braces) |
+| BUG-QA-016 | S4-Low | P3 | **Verified** (S3 QA: field-by-field spawn in Enemies/Pickups/Projectiles; pooled-reuse tests in `tests/unit/sprint3-qa.test.ts`) | Pickups / Enemies | Per-spawn object literals: `PickupManager.spawn` and `EnemyManager.spawn` still `Object.assign(x, {...})` |
+| BUG-QA-017 | S4-Low | P4 | **Verified** (S3 QA browser: Shift+1 tap released before the frame banished, 1 → 0) | Input | Shift+1..4 banish reads Shift at frame time; a quick tap released before the next frame picks the card instead |
+| BUG-QA-018 | S3-Medium | P2 | **Verified** (S3 QA: 11 achievements → 3 cards + "+8 more", buttons at y≤693 of 720) | UI (`src/ui/UI.ts` FIT) | Game-over screen overflows 1280×720 when a run earns several achievements; buttons below the fold |
+| BUG-QA-019 | S4-Low | P3 | **Verified** (S3 QA: burst of elite/swarm/rush + duplicate shows one banner at a time at 22 %; follow-ups BUG-QA-023/024) | Director announcements | Simultaneous announcements ('An elite approaches…', 'Cinders on the wind!', boss) draw on top of each other |
+| BUG-QA-020 | S4-Low | P3 | **Fixed** (S3 UI: stale 'lowlight' dropped + `Tutorial.forget`; unit-tested; browser check inconclusive, see S3 section) | Tutorial | 'Your light is fading' hint is replayed later at 100 % light (stale queued hint) |
+| BUG-QA-021 | S4-Low | P4 | **Fixed** (verified S3 QA: `CameraRig.snap` sets `mode = 'follow'`) | CameraRig | `snap()` before the first `follow()` of a run does not cancel the menu→run swoop (tools/package-screens, smoke) |
+| BUG-QA-022 | S3-Medium | P2 | **Open** · Player.ts (world-look) | Player x-ray / perf | X-ray silhouette doubles every bearer mesh: +16 draw calls (low 72 → 88, +22 %; high 131 → 152), trips the perf gate |
+| BUG-QA-023 | S4-Low | P3 | **Open** · Enemies.ts / Player.ts / Fx.ts | Announcer | Legacy Fx 'ft-big' banners ('ENRAGED', 'REKINDLED') are hidden by CSS while a UI banner shows, and enrage shows two banners for one event |
+| BUG-QA-024 | S4-Low | P3 | **Open** · UI.ts | Announcer | `UI.announce` queues 'boss' banners LIFO: 'has come' plays before 'stirs…', 'is enraged!' before 'has come' |
+| BUG-QA-025 | S4-Low | P4 | **Open** · Game.ts | Boss outro | A reliquary picked up during the 1.3 s boss-collapse outro opens immediately and freezes the collapse |
+| BUG-QA-026 | S4-Low | P4 | **Open** · Game.ts | Boss outro | Unused boss slow-mo (`slowT`) survives the dawn screen; the endless night can resume at 0.35× |
+| BUG-QA-027 | S4-Low | P3 | **Open** · UI.ts | Announcer / tutorial | First runs: announcements queued behind a hint card are dropped after 3 s, including 'boss' banners |
+| BUG-QA-028 | S4-Low | P4 | **Fixed (QA)** | tools/smoke.mjs | Smoke fast-forward died at 0:34 on a starved machine (key steering only reaches the sim on real frames) |
+| BUG-QA-029 | S2-High | P1 | **Open** · readability (Projectiles.ts / Fx.ts) + world-look (WorldShading) | Readability / VFX | Late-game centre white-out still above target with FX aged: Pines 26.7 % / 13.7 %, Ruins 16.9 % / 11.2 % (target ≤ 10 %); Glacier Heart shard starburst hides the bearer |
 
 ---
 
@@ -252,6 +260,122 @@ agent's probe (load 6–9). Evidence: `production/qa/evidence/s2-qa-*.png`.
 - `tools/smoke.mjs` extended: `smoke-09-chest`, `-10-chest-evolution`, `-11-dawn`, `-12-endless`, `-13-victory`, a
   bearer-position assertion, god mode without the invuln blink, damage-pulse reset before shots, boss spawn played
   out in sim time, portrait shot fast-forwarded past the camera swoop.
+
+## Sprint 3 QA pass (2026-11-04, working tree after readability / world-look / ui / gameplay)
+
+**Build:** scratchpad `s3-qa-build` (vite build of the working tree). **Automated:** `tsc --noEmit` clean; Vitest
+**20 files / 261 tests pass** (248 + 13 new). New regression file `tests/unit/sprint3-qa.test.ts` (11 tests) plus
+`Game S3 QA` block in `tests/unit/game-state.test.ts` (2 tests; the Player mock now has the `setXray` no-op world-look
+asked for). Every new regression test was run against a copy of the tree with its fix reverted (contact-cd/number-handle
+reset, i-frame gate, NUMBERS_CROWD, hostile palette, onHit reset, Fx banner de-dup, Fx `activeNums` decrement/clear,
+outro guard, `setXray` call) and **all 10 targeted tests failed there**, then pass on the real tree.
+**Browser:** smoke (`tools/smoke.mjs`), two exploratory flow scripts (scratchpad `s3-explore.mjs`, `s3-explore2.mjs`),
+a death probe and `tools/perf.mjs`. The machine ran at load average 12–27 (other agents' browsers), so SwiftShader
+frames took seconds; real-time checks were replaced by fixed-step sim checks where noted.
+
+### BUG-QA-022 — X-ray silhouette doubles the bearer's draw calls (S3, perf)
+- `Player.mountRig()` (Player.ts ~196–212) adds an x-ray `Mesh` child to **every** non-basic bearer mesh: 16 extra
+  draws, always on in a run. perf.mjs: low 72 → **88** draws (+22 %, both 100 and 350 enemies), high 131 → **152** (100)
+  and 142 → **156** (350); the per-mesh census shows `Head_1`, `Body_1`, `Body_2`, a 2nd `Staff_1` etc. Far inside the
+  220 budget, but it trips the +15 % regression gate and is a fixed cost on the low tier (phones).
+- Fix (Player.ts:204): only silhouette the parts that make the outline, e.g. before the loop
+  `parts.sort((a, b) => (b.geometry.boundingSphere?.radius ?? 0) - (a.geometry.boundingSphere?.radius ?? 0)); parts.length = Math.min(parts.length, 5);`
+  (call `computeBoundingSphere()` first), or match by name (`/body|robe|hood|head|cape/i`). Optionally skip x-ray on
+  `quality === 'low'`. Re-baseline perf after.
+
+### BUG-QA-023 — Legacy Fx banners swallowed / doubled (S4)
+- `style.css` hides `.fx-banner` while `#ui-root.announcing`, but Fx keeps playing its 1.2 s banner underneath, so an
+  'ENRAGED' / 'REKINDLED' that coincides with a UI banner is never seen (explore2: UI 'An elite approaches…' and Fx
+  'ENRAGED' both "on" in the same sample; the Fx one was invisible). On boss enrage the player also gets two banners
+  for one event: Enemies 'ENRAGED' (Fx) and Game's `'<Boss> is enraged!'` (UI).
+- Fix: Enemies.ts:801 delete `ctx.fx.text(e.x, 4.5, e.z, 'ENRAGED', 'ft-big');` (Game's `boss:enraged` handler already
+  announces). Fx.ts:388 `banner()`: `if (this.bannerSink) { this.bannerSink(str); return; }` with
+  `bannerSink: ((s: string) => void) | null = null;`, and in Game's constructor after the UI exists:
+  `this.fx.bannerSink = (s) => this.announce(s, 'buff');` — Player 'REKINDLED' (Player.ts:482) then goes through the
+  UI queue too.
+
+### BUG-QA-024 — Boss banners play in reverse order (S4)
+- UI.ts:666 `if (a.kind === 'boss') this.annQ.unshift(a);` — two queued boss banners are LIFO. Seen in explore2 with a
+  backed-up queue: `['The master of this night has come.', 'The master of this night stirs…', …]`. Also hits
+  'has come' + 'is enraged!' in a short fight.
+- Fix (UI.ts:666): insert after the last queued boss banner:
+  `if (a.kind === 'boss') { const i = this.annQ.findIndex((q) => q.kind !== 'boss'); this.annQ.splice(i < 0 ? this.annQ.length : i, 0, a); }`
+
+### BUG-QA-025 — Reliquary can interrupt the boss collapse (S4)
+- `chest:opened` (Game.ts:280) calls `openChest()` straight away; level-ups and the dawn wait for `outroT`, a chest
+  does not. An elite chest collected within the 1.3 s outro freezes the collapse behind the reliquary.
+- Fix (Game.ts:280): `ev.on('chest:opened', () => { if (this.outroT > 0) this.chestQueued = true; else this.openChest(); });`
+  and in `updateRun` after the outro guard: `if (this.chestQueued) { this.chestQueued = false; this.openChest(); return; }`
+  (reset `chestQueued` in `startRun`).
+
+### BUG-QA-026 — Boss slow-mo can outlive the dawn screen (S4)
+- `slowT` only drains on frames where `state === 'playing'`. When the dawn opens before 0.6 s of real playing frames
+  have passed (ff tools, very slow devices; explore2: `slow: 0.45` after choosing Endless Night) the endless night resumes
+  in 0.35× slow motion.
+- Fix (Game.ts:556 `openDawnChoice()` first line): `this.slowT = 0;` (and in `updateRun` when `outroT` crosses 0).
+
+### BUG-QA-027 — First-run announcements dropped behind hint cards (S4)
+- `UI.tickAnnounce` (UI.ts:684–686) ages queued banners while a hint card is up and drops them after
+  `ANNOUNCE_MAX_WAIT` (3 s). Hint cards stay ~5–7 s, so on runs 1–3 an elite / boss warning raised during a hint is
+  lost (explore pass 1: a burst of 3 banners during the WASD hint → none ever shown). Intended for 'danger' spam,
+  but 'boss' and 'elite' carry gameplay information.
+- Fix (UI.ts:685): `if (!(this.hintCur && (this.annQ[i].kind === 'boss' || this.annQ[i].kind === 'elite'))) this.annQ[i].wait += dt;`
+
+### BUG-QA-028 — Smoke fast-forward died at 0:34 under load (tooling, fixed by QA)
+- `tools/smoke.mjs` steered with held keys, but `Input.update()` only runs on real frames; at ~0.2 fps the D→W switch
+  never reached the sim, the bearer ran head-on into a rock at x ≈ 160 and was swarmed (death probe: pinned at
+  x = 160.5 / 102.9 in 2 of 3 runs). Every later smoke shot was the game-over screen.
+- Fixed: the fast-forward sets `g.input.moveX/moveZ` per step; `SMOKE_TIMEOUT_MS` raises the 180 s step timeout.
+- Also fixed: smoke sim loops now call `g.fx.update(1/30)` after `updateRun`, so bursts age with the sim. Without it the
+  boss close-up showed the boss-spawn + lantern-flare bursts un-aged as one white blob (`evidence/s3-qa-smoke-07-boss-unaged-fx.png`) —
+  a tool artifact, not a game bug (re-shot with aged FX: `evidence/s3-qa-smoke-07-boss.png`, clean; final smoke run OK, 12 shots).
+
+### BUG-QA-029 — Late-game white-out above target; Glacier Heart hides the bearer (S2)
+- QA re-ran readability's horde probe (`scratchpad/s3-readability/probe.mjs horde`, its `sim` calls `fx.update`, so FX
+  age) on the QA build and measured with its `luma.py` (share of luma > 0.85 in the centre 40 %, 1280×720, high):
+  **Pines 26.7 % / 13.7 %, Ruins 16.9 % / 11.2 %** (readability reported 10.7 / 5.6 and 17.4 / 9.5; target ≤ 10 %).
+  Centre mean luma 0.64–0.73. Evidence: `evidence/s3-qa-luma-horde-pines-0.png`, `-ruins-0.png`.
+- Ruins: the Glacier Heart volley is a ring of ~24 ice shards plus a white core **on the bearer** — she is not findable
+  in that frame. The shard bodies are `ProjectileManager.shards` (MeshStandardMaterial, emissive ×1.6·gain), which has
+  no focus falloff; `fx.glacierNova` adds a 2.0-intensity white shock + rune at her feet.
+- Pines: Solar Crown / Cathedral Toll rings over a lantern pool that world-look made brighter (pool luma 0.54 → 0.70,
+  their own open note) — the cream centre is mostly pool + rings, not particles.
+- Fix (readability): Projectiles.ts:385 scale shards by the focus falloff,
+  `tmpS.set(1.25 * sc, 1.1 * sc, 1.1 * sc).multiplyScalar(0.35 + 0.65 * focusFactor(p.x - player.x, p.z - player.z));`
+  (import `focusFactor` from `../render/vfx/focus`; `player` is in scope in `update`), or spawn Glacier Heart shards at
+  ≥ 1.2 m. Fx.ts:1099–1101 `glacierNova`: start the shock at 1.2 m and halve it — `GM_SHOCK, x, z, 1.2, 3.4, 0.35, 0xd8f8ff, 1.0, 0.1`,
+  rune intensity 1.4 → 0.6. Fix (world-look): cap the pool's amber push so Pines pool luma ≤ ~0.6 (their tuning knob in
+  WorldShading). Then re-measure with fx aging; a real-GPU check is still owed.
+
+### Sprint 3 items verified
+- **BUG-QA-016**: pooled spawn resets incl. the new `contactCd` / `numSlot` / `numSerial` (unit). **BUG-QA-017**: browser
+  Shift+1 tap released before the frame → banish (1 → 0). **BUG-QA-018**: 11 achievements → 3 cards + "+8 more", all
+  three buttons on screen at 1280×720. **BUG-QA-019**: elite + swarm + rush + duplicate in one frame → one UI banner at a
+  time at 22 % (de-dup works; Fx path de-dups too). **BUG-QA-020**: unit-tested (`Tutorial.forget`); in the browser the
+  stale 'lowlight' never surfaced after a refill (the WASD hint was still up, so inconclusive rather than a pass).
+- Boss outro: kill → `outroT 1.3 / slowT 0.6`; the 2.2 s dawn timer fired mid-outro and only flagged `dawnPending`; the
+  dawn opened when the outro ended (sim) — and stays closed while paused (new unit test).
+- Endless: first returning master on Pines is `boss_hollow_stag` (night's own). Fresh run after menu: no boss, victory
+  false, outro/slow 0, banner queues empty, x-ray off on menu / on in run.
+- Fx layer (`visibility: hidden`) under the level-up modal; boss bar at the bottom centre (y 643–717 of 720).
+- Contact cooldown is not burnt during i-frames; non-crit numbers hidden above 150 enemies; hostile shots within ±8° of
+  #ff3df0 for warm and cool casters; damage-number cap frees up as numbers expire (all unit).
+- **BUG-QA-010, 014, 015, 021** were already fixed in the sprint-2 commit (code checked), now closed.
+- No console errors in either exploratory pass.
+
+### Notes (no bug filed)
+- Death probe: holding one direction into a rock pins the bearer (purely radial push-out, no slide) — fine for real
+  input, but bots should steer.
+- Endless with a stationary god-mode bearer: the horde piles into a mound that hides her completely; the x-ray
+  silhouette is not readable through 3+ layers of enemies (`s3ex2-04-endless.png`). Only reachable with god mode.
+- The UI banner at 22 % sits over a boss entering from the top (`s3ex2-02-boss.png`, `-04-endless.png`); 1.2 s only.
+- The bottom-centre boss bar now covers the strip where enemies approach from the camera side (~75 px).
+- World-look occlusion dither: a waist-high rock on the camera side of the bearer turns into a large blue Bayer-halftone
+  patch (`evidence/s3-qa-smoke-03-gameplay.png`, also `perf-high-350.png`) — reads like a rendering glitch. Suggest
+  limiting the ramp to fragments above ~1.2 m or closer to the camera than the bearer by > 1 m (world-look's own known item).
+- Readability "Crits only" damage-number setting (readability request to UI) is not implemented yet.
+- `tools/perf.mjs` high/350 sim read 4.09 ms at load ~25; the quiet re-run (load 6–8) gives **1.55 ms** (S2 1.81), low/350
+  1.85 ms (S2 2.28) — no sim regression. Draw calls: see BUG-QA-022. Details in `perf-report.md`.
 
 ## State-machine edge cases verified OK (automated, `tests/unit/game-state.test.ts`)
 - Esc during level-up: ignored (no pause, choice kept). Tab hidden during level-up: stays on level-up.

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FOCUS_GLSL, FOCUS_UNIFORM } from './focus';
 
 /**
  * Immediate-mode camera-facing ribbon renderer (one draw call): every frame the owners (lightning bolts, ribbon
@@ -24,6 +25,10 @@ export class Strips {
   private nv = 0;
   private ni = 0;
   readonly camPos = new THREE.Vector3();
+  /** Brightness governor + focus protection (FxManager writes uGain every frame). */
+  readonly uniforms = { uGain: { value: 1 }, uFocus: FOCUS_UNIFORM };
+  /** Additive light queued since begin(): Σ intensity × mean width × length × alpha (pre-gain). */
+  energy = 0;
 
   constructor(scene: THREE.Scene, private maxVerts = 6000) {
     this.pos = new Float32Array(maxVerts * 3);
@@ -40,26 +45,32 @@ export class Strips {
     this.geo.setIndex(this.aIdx);
     this.geo.setDrawRange(0, 0);
     const mat = new THREE.ShaderMaterial({
+      uniforms: this.uniforms,
       vertexShader: /* glsl */ `
         attribute vec4 sCol;
         attribute vec2 sProf;
         varying vec4 vCol;
         varying vec2 vProf;
+        varying vec2 vW;
         void main() {
           vCol = sCol;
           vProf = sProf;
+          vW = position.xz;
           gl_Position = projectionMatrix * viewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
+        uniform float uGain;
         varying vec4 vCol;
         varying vec2 vProf;
+        varying vec2 vW;
+        ${FOCUS_GLSL}
         void main() {
           float s = vProf.x;
           float glow = exp(-s * s * 3.0) * (1.0 - smoothstep(0.85, 1.0, abs(s)));
           float core = exp(-s * s * 28.0) * vProf.y;
           vec3 c = vCol.rgb * glow + vec3(1.0, 0.97, 0.92) * core * (0.6 + 0.4 * length(vCol.rgb));
-          gl_FragColor = vec4(c * vCol.a, 0.0);
+          gl_FragColor = vec4(c * vCol.a * uGain * focusK(vW), 0.0);
         }
       `,
       transparent: true,
@@ -82,6 +93,7 @@ export class Strips {
   begin(camera: THREE.Camera): void {
     this.nv = 0;
     this.ni = 0;
+    this.energy = 0;
     camera.getWorldPosition(this.camPos);
   }
 
@@ -99,6 +111,9 @@ export class Strips {
     tmpCol.setHex(color);
     const r = tmpCol.r * intensity, g = tmpCol.g * intensity, b = tmpCol.b * intensity;
     const base = this.nv;
+    let len = 0;
+    for (let i = 3; i < n * 3; i += 3) len += Math.hypot(pts[i] - pts[i - 3], pts[i + 1] - pts[i - 2], pts[i + 2] - pts[i - 1]);
+    this.energy += intensity * (1 + core) * (w0 + w1) * 0.5 * len * (a0 + a1) * 0.5;
     const P = this.pos, C = this.col, Q = this.prof;
     for (let i = 0; i < n; i++) {
       const i0 = Math.max(0, i - 1) * 3;

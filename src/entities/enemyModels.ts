@@ -253,8 +253,18 @@ export function withEnemyFx(src: THREE.BufferGeometry, capacity: number, fx?: TH
 
 const RIM_COLOR = new THREE.Color(0.55, 0.62, 1.0);
 
+/**
+ * Horde palette knobs (shared by every enemy body material; tweak live via `ENEMY_PALETTE.set(...)`):
+ *   x = how far amber/orange body colours are pulled to dusky cool grey (0..1)
+ *   y = luminance knee above which body values are compressed (mid-dark bodies)
+ *   z = global saturation kept (1 = untouched)
+ *   w = slope above the knee (0 = hard clamp, 1 = untouched)
+ */
+export const ENEMY_PALETTE = new THREE.Vector4(0.75, 0.3, 0.88, 0.45);
+
 /** Lit enemy body material: vertex colours + cool moonlit rim (separates enemies from the ground at
- *  night), white-hot hit flash, golden elite aura, icy slow tint and burning ember rim. */
+ *  night), horde palette (amber pulled cool, values mid-dark), rim-light hit flash, crimson elite aura, icy slow
+ *  tint and burning ember rim. */
 export function makeEnemyBodyMaterial(vertexColors: boolean): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -265,18 +275,40 @@ export function makeEnemyBodyMaterial(vertexColors: boolean): THREE.MeshStandard
   });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uRimColor = { value: RIM_COLOR };
+    sh.uniforms.uPalette = { value: ENEMY_PALETTE };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 aFx;\nvarying vec4 vFx;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFx = aFx;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec4 vFx;\nuniform vec3 uRimColor;')
+      .replace('#include <common>', '#include <common>\nvarying vec4 vFx;\nuniform vec3 uRimColor;\nuniform vec4 uPalette;')
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+        // horde palette (art review s2 #P0): warm amber belongs to the bearer, her weapons and pickups. Enemy
+        // bodies pull amber/orange hues toward a dusky cool grey, lose a little saturation and have their
+        // values compressed to mid-dark, so a horde reads as silhouettes against the lantern pool.
+        {
+          vec3 pc = diffuseColor.rgb;
+          float pl = dot(pc, vec3(0.2126, 0.7152, 0.0722));
+          float mx = max(pc.r, max(pc.g, pc.b));
+          float mn = min(pc.r, min(pc.g, pc.b));
+          float psat = (mx - mn) / max(mx, 1e-4);
+          // hue/60deg for r >= g >= b; amber/yellow-orange sits at 0.4..1.0, red stays below ~0.25
+          float hr = (pc.g - pc.b) / max(pc.r - pc.b, 1e-4);
+          float amber = step(pc.b, pc.g) * step(pc.g, pc.r + 0.02) * smoothstep(0.22, 0.45, hr) * smoothstep(0.15, 0.45, psat);
+          pc = mix(pc, vec3(pl) * vec3(1.02, 0.9, 1.16), amber * uPalette.x);
+          pc = mix(vec3(pl), pc, uPalette.z);
+          float kl = max(pl, 1e-4);
+          if (pl > uPalette.y) pc *= (uPalette.y + (pl - uPalette.y) * uPalette.w) / kl;
+          diffuseColor.rgb = pc;
+        }
         float fxLum = dot(diffuseColor.rgb, vec3(0.3, 0.5, 0.2));
-        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55, 0.85, 1.0) * (0.45 + fxLum), vFx.z * 0.65);
+        // slowed / stunned: a cool frost tint that keeps the body mid-dark (a stunned pack must not turn pastel)
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.3, 0.48, 0.74) * (0.32 + fxLum), vFx.z * 0.38);
         float fxFlash = max(vFx.x, 0.0);
-        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.97, 0.94), fxFlash * 0.6);
+        // hit flash is mostly a rim light (see emissive below): the albedo only lifts a little, so a boss under
+        // constant fire keeps its body hue instead of turning into a pale ghost
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.97, 0.94), fxFlash * 0.2);
         diffuseColor.rgb *= 1.0 + min(vFx.x, 0.0);`,
       )
       .replace(
@@ -284,10 +316,11 @@ export function makeEnemyBodyMaterial(vertexColors: boolean): THREE.MeshStandard
         `#include <emissivemap_fragment>
         float fxRim = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 2.2);
         totalEmissiveRadiance += diffuseColor.rgb * (uRimColor * fxRim * 0.7 + 0.07);
-        totalEmissiveRadiance += vec3(1.0, 0.9, 0.82) * fxFlash * 0.3;
-        totalEmissiveRadiance += vec3(1.0, 0.7, 0.22) * (0.12 + fxRim * 2.2) * vFx.y;
-        totalEmissiveRadiance += vec3(0.5, 0.8, 1.0) * fxRim * vFx.z * 0.9;
-        totalEmissiveRadiance += vec3(1.0, 0.38, 0.08) * (0.15 + fxRim * 1.8) * vFx.w;`,
+        totalEmissiveRadiance += vec3(1.0, 0.94, 0.85) * fxFlash * (0.1 + fxRim * 1.15);
+        // elite aura: hostile crimson-magenta (gold/amber is reserved for the player's side)
+        totalEmissiveRadiance += vec3(1.0, 0.22, 0.5) * (0.1 + fxRim * 2.0) * vFx.y;
+        totalEmissiveRadiance += vec3(0.45, 0.75, 1.0) * fxRim * vFx.z * 0.5;
+        totalEmissiveRadiance += vec3(1.0, 0.38, 0.08) * (0.06 + fxRim * 1.2) * vFx.w;`,
       )
       // soft knee on direct light: enemies pressing into the lantern pool stay readable (and keep their hue)
       // instead of blowing out to pink-white; moonlight (below the knee) is untouched
@@ -316,7 +349,7 @@ export function makeEnemyGlowMaterial(vertexColors: boolean, color = 0xffffff): 
         '#include <color_fragment>',
         `#include <color_fragment>
         float gFlash = max(vFx.x, 0.0);
-        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(2.4, 2.3, 2.2), gFlash * 0.75);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.9, 1.85, 1.8), gFlash * 0.45);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(2.2, 0.9, 0.3), vFx.w * 0.35);`,
       );
   };

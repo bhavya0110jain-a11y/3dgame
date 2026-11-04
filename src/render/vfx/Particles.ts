@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ATLAS_GLSL, ATLAS_GRID, getAtlas } from './atlas';
+import { FOCUS_GLSL, FOCUS_UNIFORM } from './focus';
 
 /**
  * CPU-simulated, GPU-instanced billboard particles.
@@ -28,6 +29,8 @@ export const PF_BOUNCE = 4;
 export const PF_SOFTFADE = 8;
 /** Flicker intensity (flames, magic) */
 export const PF_FLICKER = 16;
+/** Exempt from focus protection (drawn at full strength even on the bearer). */
+export const PF_NOFOCUS = 32;
 
 const tmpColor = new THREE.Color();
 
@@ -45,6 +48,8 @@ export class ParticleSystem {
   private seed = 1;
   /** Brightness governor for additive particles (FxManager lowers it when the screen is crowded with light). */
   gain = 1;
+  /** Additive light emitted last update: sum of intensity × size² × alpha (pre-gain) — the governor's input. */
+  energy = 0;
 
   constructor(scene: THREE.Scene, capacity = 4000) {
     this.capacity = capacity;
@@ -66,7 +71,7 @@ export class ParticleSystem {
     this.attrs = [this.aPos, this.aVel, this.aCol, this.aPar];
 
     const mat = new THREE.ShaderMaterial({
-      uniforms: { uAtlas: { value: getAtlas() } },
+      uniforms: { uAtlas: { value: getAtlas() }, uFocus: FOCUS_UNIFORM },
       vertexShader: /* glsl */ `
         attribute vec4 iPos;
         attribute vec4 iVel;
@@ -76,6 +81,7 @@ export class ParticleSystem {
         varying vec4 vCol;
         varying float vAdd;
         ${ATLAS_GLSL}
+        ${FOCUS_GLSL}
         void main() {
           vec2 corner = position.xy;
           float size = iPos.w;
@@ -84,7 +90,11 @@ export class ParticleSystem {
           vUv = atlasUv(iPar.x, corner + 0.5);
           vCol = iCol;
           vAdd = iPar.z;
-          if (iPar.w > 0.5) {
+          // iPar.w: 1 = ground-aligned, +2 = exempt from focus protection
+          float noFocus = step(1.5, iPar.w);
+          float ground = iPar.w - 2.0 * noFocus;
+          vCol *= noFocus > 0.5 ? 1.0 : focusK(iPos.xz);
+          if (ground > 0.5) {
             // flat on the ground plane
             vec2 c = vec2(corner.x * cr.x - corner.y * cr.y, corner.x * cr.y + corner.y * cr.x) * size;
             gl_Position = projectionMatrix * viewMatrix * vec4(iPos.x + c.x, iPos.y, iPos.z + c.y, 1.0);
@@ -190,6 +200,7 @@ export class ParticleSystem {
     const V = this.aVel.array as Float32Array;
     const C = this.aCol.array as Float32Array;
     const Q = this.aPar.array as Float32Array;
+    let energy = 0;
     let i = 0;
     while (i < this.count) {
       const o = i * F;
@@ -241,7 +252,9 @@ export class ParticleSystem {
       const fi = d[o + FADEIN];
       let alpha = fi > 0 && t < fi ? t / fi : 1;
       alpha *= flags & PF_SOFTFADE ? Math.pow(1 - t, 0.6) : Math.pow(1 - t, 1.4);
-      let inten = d[o + INT] * (d[o + ADD] > 0.5 ? this.gain : 1);
+      const additive = d[o + ADD] > 0.5;
+      if (additive) energy += d[o + INT] * size * size * alpha;
+      let inten = d[o + INT] * (additive ? this.gain : 1);
       if (flags & PF_FLICKER) inten *= 0.75 + 0.5 * this.rand();
       P[j] = d[o + X]; P[j + 1] = d[o + Y]; P[j + 2] = d[o + Z]; P[j + 3] = size;
       V[j] = d[o + VX]; V[j + 1] = d[o + VY]; V[j + 2] = d[o + VZ]; V[j + 3] = d[o + STRETCH];
@@ -249,9 +262,11 @@ export class ParticleSystem {
       C[j + 1] = (d[o + G0] + (d[o + G1] - d[o + G0]) * t) * inten;
       C[j + 2] = (d[o + B0] + (d[o + B1] - d[o + B0]) * t) * inten;
       C[j + 3] = alpha;
-      Q[j] = d[o + FRAME]; Q[j + 1] = d[o + ROT]; Q[j + 2] = d[o + ADD]; Q[j + 3] = flags & PF_GROUND ? 1 : 0;
+      Q[j] = d[o + FRAME]; Q[j + 1] = d[o + ROT]; Q[j + 2] = d[o + ADD];
+      Q[j + 3] = (flags & PF_GROUND ? 1 : 0) + (flags & PF_NOFOCUS ? 2 : 0);
       i++;
     }
+    this.energy = energy;
     const n = this.count;
     this.geo.instanceCount = n;
     if (n > 0) {

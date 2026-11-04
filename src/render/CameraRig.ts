@@ -9,6 +9,18 @@ const HEIGHT = 18.5;
 const BACK = 14.5;
 /** Direction the menu hero shot looks (towards the low moon over the -Z horizon, see Sky.moonDir). */
 const HERO_FWD = new THREE.Vector3(-0.3, 0, -1).normalize();
+/** Zoom at an empty field: ~10% closer than the base framing so the bearer reads >= ~45 px tall at 720p. */
+const ZOOM_CALM = 0.9;
+/** Zoom at full crowd pressure. */
+const ZOOM_CROWD = 1.3;
+/** A boss closer than this (m) pulls the framing (art review s2 #13): the look-at is biased towards it and the
+ *  camera zooms out, so a tall boss clears the boss bar at the top of the screen. */
+const BOSS_FRAME_R = 14;
+/** Share of the bearer→boss offset added to the look-at (capped 5.5 m). Review asked 25%; ~40% was needed for the
+ *  Hollow Stag's antlers to clear the boss bar at 720p. */
+const BOSS_BIAS = 0.4;
+/** Extra zoom-out while a boss is within BOSS_FRAME_R. */
+const BOSS_ZOOM = 0.12;
 /** Duration (s) of the menu → run swoop. */
 const SWOOP_S = 1.35;
 
@@ -24,8 +36,8 @@ const SWOOP_S = 1.35;
 export class CameraRig {
   /** Smoothed point the camera looks at (ground level). Also the moon-shadow centre. */
   readonly focus = new THREE.Vector3();
-  /** Current zoom multiplier (1 = default framing). */
-  zoom = 1;
+  /** Current zoom multiplier (1 = default framing, ZOOM_CALM on an empty field). */
+  zoom = ZOOM_CALM;
   private lead = new THREE.Vector3();
   private look = new THREE.Vector3();
   private desiredPos = new THREE.Vector3();
@@ -49,6 +61,7 @@ export class CameraRig {
   }
 
   menu(dt: number, x: number, z: number): void {
+    const cam = this.camera;
     if (this.mode !== 'menu') {
       this.mode = 'menu';
       this.menuT = 0;
@@ -57,20 +70,22 @@ export class CameraRig {
     const t = this.menuT;
     // gentle sway (±7°) + breathing dolly; never a full orbit, so the moon stays framed behind the bearer
     const yaw = Math.sin(t * 0.11) * 0.12;
-    const dist = 6.1 + Math.sin(t * 0.17) * 0.25;
+    // portrait: the menu stack fills the lower third, so pull back and centre the bearer (x ≈ 50%, y ≈ 58%)
+    const portrait = cam.aspect < 1;
+    const dist = (6.1 + Math.sin(t * 0.17) * 0.25) * (portrait ? 1.3 : 1);
     const cy = Math.cos(yaw);
     const sy = Math.sin(yaw);
     const fx = HERO_FWD.x * cy - HERO_FWD.z * sy;
     const fz = HERO_FWD.x * sy + HERO_FWD.z * cy;
     const rx = -fz;
     const rz = fx;
-    const cam = this.camera;
     cam.position.set(x - fx * dist + rx * 0.5, 1.5 + Math.sin(t * 0.23) * 0.06, z - fz * dist + rz * 0.5);
     // look past the bearer, offset right → bearer sits on the left third, sky + moon fill the upper frame
-    this.look.set(x + fx * 4 + rx * 3.1, 2.25, z + fz * 4 + rz * 3.1);
+    if (portrait) this.look.set(x + fx * 4 - rx * 0.45, 1.3, z + fz * 4 - rz * 0.45);
+    else this.look.set(x + fx * 4 + rx * 3.1, 2.25, z + fz * 4 + rz * 3.1);
     cam.lookAt(this.look);
     this.focus.set(x, 0, z);
-    this.zoom = 1;
+    this.zoom = ZOOM_CALM;
     this.updateView();
   }
 
@@ -136,14 +151,21 @@ export class CameraRig {
     this.lead.z += (lz - this.lead.z) * kl;
     let tx = x + this.lead.x;
     let tz = z + this.lead.z;
+    let bossW = 0;
     if (Number.isFinite(bossX)) {
-      // keep the boss in the frame: drift up to 4 m towards it
-      let bx = (bossX - x) * 0.3;
-      let bz = (bossZ - z) * 0.3;
+      // boss within ~14 m: bias the look-at towards it (capped 5.5 m) so boss and bearer share the frame and the
+      // boss bar does not sit on its head; fades out between 14 and 20 m
+      const dx = bossX - x;
+      const dz = bossZ - z;
+      const d = Math.hypot(dx, dz);
+      const u = clamp((d - BOSS_FRAME_R) / 6, 0, 1);
+      bossW = 1 - u * u * (3 - 2 * u);
+      let bx = dx * BOSS_BIAS * bossW;
+      let bz = dz * BOSS_BIAS * bossW;
       const bl = Math.hypot(bx, bz);
-      if (bl > 4) {
-        bx *= 4 / bl;
-        bz *= 4 / bl;
+      if (bl > 5.5) {
+        bx *= 5.5 / bl;
+        bz *= 5.5 / bl;
       }
       tx += bx;
       tz += bz;
@@ -151,7 +173,7 @@ export class CameraRig {
     const kf = smooth(7, dt);
     this.focus.x += (tx - this.focus.x) * kf;
     this.focus.z += (tz - this.focus.z) * kf;
-    const targetZoom = 1 + clamp(crowd, 0, 1) * 0.3;
+    const targetZoom = (ZOOM_CALM + clamp(crowd, 0, 1) * (ZOOM_CROWD - ZOOM_CALM)) * (1 + BOSS_ZOOM * bossW);
     this.zoom += (targetZoom - this.zoom) * smooth(targetZoom > this.zoom ? 0.9 : 0.5, dt);
 
     const z0 = this.zoom;

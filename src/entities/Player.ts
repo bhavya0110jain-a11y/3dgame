@@ -74,12 +74,56 @@ function softenDirectLight(mat: THREE.MeshStandardMaterial): void {
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-      float bRim = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 3.0);
-      totalEmissiveRadiance += diffuseColor.rgb * vec3(0.45, 0.6, 1.25) * bRim * 0.55;`,
+      float bNV = 1.0 - saturate(dot(normal, normalize(vViewPosition)));
+      float bRim = pow(bNV, 3.0);
+      totalEmissiveRadiance += diffuseColor.rgb * vec3(0.45, 0.6, 1.25) * bRim * 0.4;
+      // warm presence rim (#ffd9a0, art review P2 #20): the bearer pops off any ground, lit pool or dark field
+      totalEmissiveRadiance += vec3(1.0, 0.851, 0.627) * pow(bNV, 2.4) * 0.35;`,
       );
   };
   mat.customProgramCacheKey = () => 'bearer-soft-light';
 }
+
+/** Pulls the x-ray copy this far (m) towards the camera along the view ray: the bearer's own overlapping parts
+ *  (cape behind body, arm in front of robe) are never further apart than this, so they don't x-ray themselves.
+ *  Scaling the whole view-space position keeps the projected silhouette pixel-identical. */
+const XRAY_PULL = 0.9;
+
+/**
+ * Occlusion silhouette (art review P0 #2 part 2): every bearer mesh is drawn a second time with GreaterDepth, so
+ * wherever a crown, wall, boss body or crowd covers her, a warm #ffd9a0 silhouette (brighter at the rim) shows
+ * through. Shares the body geometry and inherits the animated part transforms (child of each mesh).
+ */
+const xrayMaterial = new THREE.ShaderMaterial({
+  uniforms: { uColor: { value: new THREE.Color(0xffd9a0) }, uOpacity: { value: 0.55 } },
+  vertexShader: /* glsl */ `
+    varying vec3 vN;
+    varying vec3 vV;
+    void main() {
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      mv.xyz *= (mv.z + ${XRAY_PULL.toFixed(2)}) / min(mv.z, -1.0);
+      vN = normalize(normalMatrix * normal);
+      vV = normalize(-mv.xyz);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform vec3 uColor;
+    uniform float uOpacity;
+    varying vec3 vN;
+    varying vec3 vV;
+    void main() {
+      float rim = 1.0 - abs(dot(normalize(vN), normalize(vV)));
+      gl_FragColor = vec4(uColor * (0.75 + 0.6 * rim), uOpacity * (0.55 + 0.45 * rim));
+    }`,
+  transparent: true,
+  depthWrite: false,
+  depthFunc: THREE.GreaterDepth,
+  fog: false,
+});
+
+/** Red lanterns (Pyre) would paint a red pool around a red-robed bearer: the ground light is nudged towards
+ *  amber-orange while the lantern glass and weapons keep the character colour. */
+const POOL_HUE_MIN = 0.075;
 
 export class Player {
   readonly group = new THREE.Group();
@@ -104,6 +148,7 @@ export class Player {
   lightColor = new THREE.Color(0xffa64d);
 
   private rig: Rig;
+  private xray: THREE.Mesh[] = [];
   private robeHex = 0x3b3550;
   // animation state
   private moveAmt = 0;
@@ -141,8 +186,30 @@ export class Player {
     }
   }
 
+  /** Shows / hides the occlusion silhouette (off on the menu hero shot, where foreground grass sits in front). */
+  setXray(on: boolean): void {
+    for (const m of this.xray) m.visible = on;
+  }
+
   private mountRig(): void {
     this.body.add(this.rig.root);
+    // x-ray silhouette copies of every visible body part (not the light glass / eyes)
+    for (const m of this.xray) m.removeFromParent();
+    this.xray.length = 0;
+    const parts: THREE.Mesh[] = [];
+    this.rig.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && m.material !== xrayMaterial && !(m.material as THREE.Material & { isMeshBasicMaterial?: boolean }).isMeshBasicMaterial) parts.push(m);
+    });
+    for (const m of parts) {
+      const x = new THREE.Mesh(m.geometry, xrayMaterial);
+      x.renderOrder = 10;
+      x.castShadow = false;
+      x.receiveShadow = false;
+      x.frustumCulled = m.frustumCulled;
+      m.add(x);
+      this.xray.push(x);
+    }
     // Light sits above the lantern (not inside it) so the bearer is lit, not blown out, by it.
     this.rig.root.add(this.light);
     this.rig.root.updateMatrixWorld(true);
@@ -346,6 +413,11 @@ export class Player {
       if (h > 0.66) h = 0.63 + (h - 0.66) * 0.1;
       s = Math.min(0.8, tmpHsl.s * 1.8 + 0.35);
       l = Math.min(0.44, Math.max(0.34, tmpHsl.l * 1.1 + 0.12));
+    } else if (h < 0.06 || h >= 0.97) {
+      // red cloth on an amber/orange pool: shift to a deep wine and keep it darker than the pool
+      h = 0.968;
+      s = Math.min(0.6, tmpHsl.s * 1.4 + 0.2);
+      l = Math.min(0.3, Math.max(0.22, tmpHsl.l * 1.05 + 0.04));
     } else {
       s = Math.min(0.8, tmpHsl.s * 1.8 + 0.25);
       l = Math.min(0.42, Math.max(0.28, tmpHsl.l * 1.1 + 0.1));
@@ -458,6 +530,10 @@ export class Player {
     this.light.distance = radius * 1.35;
     this.light.intensity = (18 + 40 * frac) * flicker;
     this.light.color.copy(this.lightColor);
+    this.light.color.getHSL(tmpHsl);
+    if (tmpHsl.s > 0.3 && (tmpHsl.h < POOL_HUE_MIN || tmpHsl.h > 0.94)) {
+      this.light.color.setHSL(POOL_HUE_MIN, tmpHsl.s, Math.max(tmpHsl.l, 0.64));
+    }
     const s = 0.94 + 0.08 * frac + Math.sin(time * 20) * 0.02;
     this.lantern.scale.set(s, 1, s);
     this.rig.glassMat.color

@@ -41,8 +41,8 @@ const vertex = /* glsl */ `
       float y = mod(t * (0.18 + 0.12 * aSeed.z) + ph * 3.0, H);
       base += vec2(sin(t * 0.4 + ph) * 0.8, cos(t * 0.33 + ph) * 0.8) + uWind * y * 0.4;
       p = vec3(0.0, y, 0.0);
-      a = smoothstep(0.0, 0.8, y) * (1.0 - smoothstep(H * 0.7, H, y));
-      size = 0.075;
+      a = smoothstep(0.0, 0.8, y) * (1.0 - smoothstep(H * 0.7, H, y)) * 0.35;
+      size = 0.03;
     } else if (uKind < 2.5) {     // leaf: fall with flutter
       float H = 7.0;
       float y = H - mod(t * (0.45 + 0.3 * aSeed.z) + ph * 5.0, H);
@@ -72,6 +72,8 @@ const vertex = /* glsl */ `
     float edge = max(abs(rel.x), abs(rel.y)) / ${(AREA / 2).toFixed(1)};
     a *= 1.0 - smoothstep(0.75, 1.0, edge);
     vAlpha = a;
+    // motes right in front of the lens read as dirt on it (spore bokeh, art review s2 #7): fade within ~4 m
+    a *= smoothstep(2.5, 4.5, length(p - cameraPosition));
     vec4 mv = viewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
     gl_PointSize = clamp(size * uPixel / -mv.z, 1.0, 48.0);

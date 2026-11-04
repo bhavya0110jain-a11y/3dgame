@@ -75,6 +75,24 @@ Object.assign(P, {
   stick: '<circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="5"/><path d="M12 .8 9.8 3.2h4.4zM12 23.2l-2.2-2.4h4.4zM.8 12l2.4-2.2v4.4zM23.2 12l-2.4-2.2v4.4z"/>',
 });
 
+// Sprint 3: evolved weapons get their own glyphs (data keeps the base weapon's icon; the UI maps evolution id → glyph)
+Object.assign(P, {
+  // three sun-forged spears fanned out under a small sun
+  'evo-sunspear': '<path d="M4 20 15.5 8.5M2.5 13.5l7-7M10.5 21.5l7-7" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" fill="none"/><path d="M21.5 2.5l-8.2 3.4 4.8 4.8zM14 2.2 7.8 4.6l3.4 3.4zM21.8 10l-2.4 6.2-3.4-3.4z"/>',
+  // a sun ringed by a crown of smaller suns
+  'evo-crown': '<circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="3.4" r="2.1"/><circle cx="19.4" cy="7.7" r="2.1"/><circle cx="19.4" cy="16.3" r="2.1"/><circle cx="12" cy="20.6" r="2.1"/><circle cx="4.6" cy="16.3" r="2.1"/><circle cx="4.6" cy="7.7" r="2.1"/>',
+  // half sun breaking over the horizon, with rays
+  'evo-dawn': '<path d="M5.5 17a6.5 6.5 0 0 1 13 0z"/><path d="M1.5 18.5h21V21h-21z"/><path d="M12 3v4M4.2 6.6l2.6 2.8M19.8 6.6l-2.6 2.8M1.8 12.6l3.4 1M22.2 12.6l-3.4 1" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/>',
+  // three lightning forks
+  'evo-tempest': '<path d="M12.5 1.5 7 11.5h4l-2 11 7.5-12.5h-4.2z"/><path d="M5.5 3 2 9.5h2.6L3.4 15l4.4-7H5.3z" opacity=".8"/><path d="M19.5 3 16 9.5h2.6L17.4 15l4.4-7h-2.5z" opacity=".8"/>',
+  // four rays of light from a bright core
+  'evo-beacon': '<path d="M12 .8l1.9 8.3 8.3 2.9-8.3 2.9L12 23.2l-1.9-8.3L1.8 12l8.3-2.9z"/><circle cx="12" cy="12" r="2.4" fill="#fff" opacity=".7"/>',
+  // a garden of three flames
+  'evo-pyre': '<path d="M12 3c.8 3 4.6 4.6 4.6 9.2a4.6 4.6 0 0 1-9.2 0c0-2.3 1.5-3 1.5-5.3 1.5.8 1.5 2.3 1.5 2.3S12 7 12 3z"/><path d="M5 10c.5 2 3 3 3 6a3 3 0 0 1-6 0c0-1.5 1-2 1-3.5 1 .5 1 1.5 1 1.5S5 12.5 5 10zM19 10c.5 2 3 3 3 6a3 3 0 0 1-6 0c0-1.5 1-2 1-3.5 1 .5 1 1.5 1 1.5s1-1.5 1-4z" opacity=".8"/><path d="M2 21h20v1.8H2z"/>',
+  // a crystal heart of rime
+  'evo-glacier': '<path d="M12 21.5 3.2 12.4A5.1 5.1 0 0 1 12 6.3a5.1 5.1 0 0 1 8.8 6.1z"/><path d="M12 8.5v10M8 11.5l8 4M16 11.5l-8 4" stroke="#fff" stroke-width="1.3" opacity=".75" fill="none"/>',
+});
+
 export function icon(name: string, cls = ''): string {
   const body = P[name] ?? P.star;
   return `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${body}</svg>`;
