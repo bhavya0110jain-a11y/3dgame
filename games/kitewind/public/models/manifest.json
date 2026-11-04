@@ -1,0 +1,19 @@
+{
+  "_doc": "GLB overrides built by tools/blender/build_models.py. Map a model id to a file in public/models/. Missing ids/files fall back to procedural geometry. See src/render/Models.ts for ids, conventions and the material contract.",
+  "models": {
+    "island_0": "island_0.glb",
+    "island_1": "island_1.glb",
+    "island_2": "island_2.glb",
+    "island_3": "island_3.glb",
+    "island_4": "island_4.glb",
+    "island_5": "island_5.glb",
+    "spire": "spire.glb",
+    "arch": "arch.glb",
+    "lantern": "lantern.glb",
+    "kite_swallow": "kite_swallow.glb",
+    "kite_koi": "kite_koi.glb",
+    "kite_moth": "kite_moth.glb",
+    "kite_dragon": "kite_dragon.glb",
+    "kite_crane": "kite_crane.glb"
+  }
+}

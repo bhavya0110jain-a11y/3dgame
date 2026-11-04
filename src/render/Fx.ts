@@ -7,6 +7,7 @@ import { Lightning, Ribbons, Strips } from './vfx/Strips';
 import { Billboards } from './vfx/Billboards';
 import { FirePools } from './vfx/FirePools';
 import { setFocusPoint } from './vfx/focus';
+import { damageNumbersMode, type DamageNumbersSetting } from './vfx/damageNumbers';
 
 /**
  * FxManager — every transient visual effect in the game ("moonlit storybook" VFX). Draw calls, total:
@@ -47,6 +48,8 @@ export const NUM_MERGE = 0.25;
 export const NUM_CAP = 24;
 export const NUM_SMALL = 0.7;
 export const NUM_ALPHA = 0.8;
+/** Seconds (real time) before another level-up pillar may start; matches the gold column's life. */
+const LEVELUP_GAP = 1.8;
 /** World banners ('ft-big'): one at a time, under the dawn bar, BANNER_TIME seconds each. */
 export const BANNER_TIME = 1.2;
 const BANNER_QUEUE = 4;
@@ -151,7 +154,8 @@ export class FxManager {
   readonly ribbons: Ribbons;
   readonly fire: FirePools;
   private boards: Billboards;
-  damageNumbers = true;
+  /** Damage-number setting from the save: legacy boolean or 'all' | 'crits' | 'off' (crit filtering is the caller's). */
+  damageNumbers: DamageNumbersSetting = true;
 
   // transient light columns (level-up, boss death): SoA x y z w h color int age life flags
   private cols = new Float32Array(16 * 10);
@@ -199,6 +203,11 @@ export class FxManager {
   private readonly maxTexts = 90;
   private textSerial = 0;
   private activeNums = 0;
+  /**
+   * When set (Game wires it to the UI announcer), `banner()` forwards here instead of drawing its own DOM banner,
+   * so there is a single announcement queue (BUG-QA-023).
+   */
+  bannerSink: ((s: string) => void) | null = null;
   private bannerEl: HTMLDivElement | null = null;
   private bannerQ: string[] = [];
   private bannerT = -1;
@@ -207,6 +216,14 @@ export class FxManager {
   private hitBudget = 0;
   private lastHitSource = '';
   private time = 0;
+  /** Real time of the last level-up pillar (see levelUp). */
+  private levelUpAt = -1e9;
+  /** Last Pyre Garden pool drawn on the bearer (time, position) — see pyreBloom. */
+  private pyreT = -1e9;
+  /** Simulated (scaled) time, advanced by update(dt). */
+  private simTime = 0;
+  private pyreX = 0;
+  private pyreZ = 0;
 
   constructor(private scene: THREE.Scene, private camera: THREE.Camera, private uiLayer: HTMLElement) {
     this.particles = new ParticleSystem(scene, 4000);
@@ -285,7 +302,7 @@ export class FxManager {
       this.banner(str);
       return;
     }
-    if (!this.damageNumbers && cls !== 'ft-heal') return;
+    if (damageNumbersMode(this.damageNumbers) === 'off' && cls !== 'ft-heal') return;
     let key = cls;
     if (key === '' && this.lastHitSource) key = this.lastHitSource;
     this.lastHitSource = '';
@@ -297,7 +314,7 @@ export class FxManager {
    * NUM_MERGE seconds, or -1 when the number was dropped (cap reached by crits / numbers off).
    */
   damageNumber(x: number, y: number, z: number, amount: number, cls = ''): number {
-    if (!this.damageNumbers) return -1;
+    if (damageNumbersMode(this.damageNumbers) === 'off') return -1;
     let key = cls;
     if (key === '' && this.lastHitSource) key = this.lastHitSource;
     this.lastHitSource = '';
@@ -386,6 +403,10 @@ export class FxManager {
 
   /** Queues a world announcement banner (deduplicated; one shown at a time). */
   banner(str: string): void {
+    if (this.bannerSink) {
+      this.bannerSink(str);
+      return;
+    }
     if (typeof document === 'undefined') return;
     const q = this.bannerQ;
     if (q[q.length - 1] === str || (this.bannerT >= 0 && this.bannerEl?.textContent === str && q.length === 0)) return;
@@ -405,8 +426,6 @@ export class FxManager {
     if (this.bannerT < 0) {
       el.textContent = this.bannerQ.shift() ?? '';
       this.bannerT = 0;
-      // under the dawn bar; while a boss bar is up, under the boss bar instead
-      el.style.top = document.querySelector?.('.boss-bar.visible') ? '33%' : '22%';
     }
     this.bannerT += realDt;
     const t = this.bannerT;
@@ -503,11 +522,12 @@ export class FxManager {
       const sp = 0.6 + this.r() * 1.4;
       ps.emit(x + Math.cos(a) * 0.2, y * 0.8, z + Math.sin(a) * 0.2, Math.cos(a) * sp, 0.7 + this.r() * 0.8, Math.sin(a) * sp, 0.7 + this.r() * 0.5, 0.7 * scale, 1.9 * scale, 0x4a4060, 0x1c1826, 1, this.r() < 0.5 ? Frame.SMOKE : Frame.SMOKE2, 0, 0.3, 1.6, 0, PF_SOFTFADE, this.r() * 6.28, (this.r() - 0.5) * 2, 0, 0.12);
     }
-    const flakes = Math.ceil(3 * k * room);
+    // ash flakes: none when the field is busy (hundreds of near-black slivers read as static), lifted colours
+    const flakes = ps.pressure > 0.5 ? 0 : Math.ceil(2 * k * room);
     for (let i = 0; i < flakes; i++) {
       const a = this.r() * Math.PI * 2;
       const sp = 1.5 + this.r() * 3;
-      ps.emit(x, y, z, Math.cos(a) * sp, 3 + this.r() * 3, Math.sin(a) * sp, 0.9 + this.r() * 0.5, 0.16 * scale, 0.1 * scale, 0x2a2430, 0x141018, 1, Frame.FLAKE, 0, -12, 0.8, 0, PF_BOUNCE, this.r() * 6, (this.r() - 0.5) * 14, 0, 0.02);
+      ps.emit(x, y, z, Math.cos(a) * sp, 3 + this.r() * 3, Math.sin(a) * sp, 0.9 + this.r() * 0.5, 0.16 * scale, 0.1 * scale, 0x5a4c6a, 0x2e2838, 1, Frame.FLAKE, 0, -12, 0.8, 0, PF_BOUNCE, this.r() * 6, (this.r() - 0.5) * 14, 0, 0.02);
     }
     if (tier >= 1) {
       this.light(x, y + 0.6, z, color, tier === 2 ? 70 : 35, tier === 2 ? 18 : 9, tier === 2 ? 1.4 : 0.45);
@@ -593,6 +613,9 @@ export class FxManager {
   /** Level-up: radiant column of light, rune circle, shockwave and rising stars. Animates on real time (game is paused). */
   levelUp(x: number, z: number): void {
     const ps = this.particles;
+    // chained level-ups (several levels from one gem burst) must not stack pillars on the bearer: one at a time
+    if (this.time - this.levelUpAt < LEVELUP_GAP) return;
+    this.levelUpAt = this.time;
     this.column(x, 0, z, 3.2, 16, 0xffd27a, 2.4, 1.8, PF_UNSCALED);
     this.column(x, 0, z, 1.2, 18, 0xffffff, 2.5, 1.5, PF_UNSCALED);
     this.ground.add(GM_RUNE, x, z, 0.8, 3.4, 1.8, 0xffd27a, 2.2, 0.12, 0, GF_UNSCALED);
@@ -960,15 +983,17 @@ export class FxManager {
   lighthouseBeam(px: number, pz: number, cx: number, cz: number, len: number, w: number, evolved: boolean, t: number): void {
     const c = evolved ? 0xff7ad0 : 0x7ac8ff;
     const hot = evolved ? 0xfff0c0 : 0xe6f6ff;
-    const ax = px + cx * 0.65, az = pz + cz * 0.65;
+    // the lens sits 1.4 m out and the beam fades IN along its length (art review s3 #1a): stacked evolved beams
+    // must not start at full white on the bearer's chest
+    const ax = px + cx * 1.4, az = pz + cz * 1.4;
     const bx = px + cx * len, bz = pz + cz * len;
-    this.beam(ax, 1.05, az, bx, 0.75, bz, w * 1.4, w * 4.2, c, 0.75, 0.7, 0.18, 0.12);
-    this.beam(ax, 1.05, az, bx, 0.75, bz, w * 0.4, w * 0.9, hot, 1.5, 0.95, 0.1, 0.9);
+    this.beam(ax, 1.05, az, bx, 0.75, bz, w * 1.4, w * 4.2, c, 0.75, 0.15, 0.18, 0.12);
+    this.beam(ax, 1.05, az, bx, 0.75, bz, w * 0.4, w * 0.9, hot, 1.5, 0.25, 0.1, 0.5);
     for (let k = 1; k <= 3; k++) {
       const f = k / 3.6;
       this.groundGlow(px + cx * len * f, pz + cz * len * f, w * 2.2 + len * f * 0.55, c, 0.2);
     }
-    this.glow(ax, 1.05, az, 0.85, hot, 2.2, Frame.CORE);
+    this.glow(ax, 1.05, az, 0.6, hot, 1.1, Frame.CORE);
     this.glow(bx, 0.75, bz, 1.3, c, 1.0, Frame.FLARE, t * 2);
     if (evolved) this.glow(bx, 0.75, bz, 1.1, 0xffe08a, 1.2, Frame.STAR, -t * 3);
   }
@@ -987,9 +1012,10 @@ export class FxManager {
   /** Sunspear impact: a golden starburst, shock ring and flame licks. */
   sunBurst(x: number, z: number, r: number): void {
     const ps = this.particles;
-    this.ground.add(GM_SHOCK, x, z, 0.2, r, 0.24, 0xffe08a, 1.5, 0.12);
-    ps.emit(x, 1, z, 0, 0, 0, 0.16, 0.5, Math.min(1.6, r), 0xffffff, 0xffd27a, 1.2 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r() * 6);
-    if (ps.pressure > 0.8) return;
+    // s3: a volley lands in the contact ring around the bearer every 0.5 s — softer star, no sparks when busy
+    this.ground.add(GM_SHOCK, x, z, 0.2, r, 0.24, 0xffe08a, 1.0, 0.12);
+    ps.emit(x, 1, z, 0, 0, 0, 0.16, 0.5, Math.min(1.3, r), 0xfff4d8, 0xffd27a, 0.8 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, this.r() * 6);
+    if (ps.pressure > 0.5) return;
     for (let i = 0; i < 6; i++) {
       const a = this.r() * Math.PI * 2;
       const sp = 5 + this.r() * 6;
@@ -1000,8 +1026,8 @@ export class FxManager {
 
   /** Sunspear volley loosed: golden muzzle + a sun-sigil flash at the hand. */
   sunVolley(x: number, z: number, dx: number, dz: number): void {
-    this.muzzle(x + dx * 0.7, 1.4, z + dz * 0.7, dx, dz, 0xffe08a, 1.7);
-    this.ground.add(GM_SHOCK, x + dx * 0.8, z + dz * 0.8, 0.2, 1.4, 0.2, 0xffd27a, 1.6, 0.08);
+    this.muzzle(x + dx * 1.2, 1.4, z + dz * 1.2, dx, dz, 0xffe08a, 1.2);
+    this.ground.add(GM_SHOCK, x + dx * 1.2, z + dz * 1.2, 0.2, 1.4, 0.2, 0xffd27a, 1.0, 0.08);
   }
 
   /** Dawnbreak anticipation (every frame in the last ~0.35 s before a pulse; p = 0 → 1): light gathers inward. */
@@ -1059,16 +1085,29 @@ export class FxManager {
     const ps = this.particles;
     for (let i = 0; i < n; i++) {
       const a = a0 + (i / n) * Math.PI * 2;
-      const fx = x + Math.cos(a) * 1.1, fz = z + Math.sin(a) * 1.1;
-      ps.emit(fx, 1.1, fz, Math.cos(a) * 4, 0, Math.sin(a) * 4, 0.16, 0.6, 2.0, 0xffffff, 0xffe08a, 2.2 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, a);
+      const fx = x + Math.cos(a) * 1.6, fz = z + Math.sin(a) * 1.6;
+      ps.emit(fx, 1.1, fz, Math.cos(a) * 4, 0, Math.sin(a) * 4, 0.16, 0.5, 1.4, 0xfff4d8, 0xffe08a, 1.3 * this.flashK, Frame.STAR, 1, 0, 0, 0, 0, a);
     }
-    this.ground.add(GM_SHOCK, x, z, 0.6, 3.2, 0.3, 0xffe8b0, 1.8, 0.1);
+    this.ground.add(GM_SHOCK, x, z, 1.2, 3.2, 0.3, 0xffe8b0, 1.0, 0.1);
   }
 
   /** Pyre Garden: a fire pool plus a golden garden-sigil around it that burns for its lifetime. */
   pyreBloom(x: number, z: number, r: number, life: number): void {
+    // Pyre Garden plants one zone on the bearer every volley and zones outlive the cooldown, so 2–3 fire discs used
+    // to stack on her (the brightest thing in the late-game frame). A new pool on top of a still-young one close to
+    // the bearer keeps only its faint sigil; the damage zone itself is unchanged.
+    const onBearer = this.focusD2(x, z) < 2.25;
+    if (onBearer && this.simTime - this.pyreT < life * 0.75 && (x - this.pyreX) ** 2 + (z - this.pyreZ) ** 2 < r * r * 0.36) {
+      this.ground.add(GM_RUNE, x, z, r * 0.92, r * 1.02, life * 0.5, 0xffa040, 0.45, 0.05);
+      return;
+    }
+    if (onBearer) {
+      this.pyreT = this.simTime;
+      this.pyreX = x;
+      this.pyreZ = z;
+    }
     this.firePool(x, z, r, life);
-    this.ground.add(GM_RUNE, x, z, r * 0.92, r * 1.02, life, 0xffa040, 0.9, 0.05);
+    this.ground.add(GM_RUNE, x, z, r * 0.92, r * 1.02, life, 0xffa040, onBearer ? 0.6 : 0.9, 0.05);
   }
 
   /** Standing in your own garden: warm golden motes rise around the bearer's feet. */
@@ -1096,9 +1135,10 @@ export class FxManager {
 
   /** Glacier Heart volley: a frost sigil and icy burst at the bearer's feet. */
   glacierNova(x: number, z: number): void {
-    this.ground.add(GM_RUNE, x, z, 1.2, 2.6, 0.55, 0xb8f0ff, 1.4, 0.1);
-    this.ground.add(GM_SHOCK, x, z, 0.4, 3.4, 0.35, 0xd8f8ff, 2, 0.12);
-    this.frostPuff(x, 0.6, z, 6, 0.8);
+    // shock starts 1.2 m out at half strength, faint rune (BUG-QA-029: the volley must not bury the bearer)
+    this.ground.add(GM_RUNE, x, z, 1.2, 2.6, 0.55, 0xb8f0ff, 0.6, 0.1);
+    this.ground.add(GM_SHOCK, x, z, 1.2, 3.4, 0.35, 0xd8f8ff, 1.0, 0.1);
+    this.frostPuff(x, 0.6, z, 4, 0.7);
   }
 
   // ======================================================================== frame
@@ -1107,6 +1147,7 @@ export class FxManager {
     const realDt = this.lastReal ? Math.min(0.05, (now - this.lastReal) / 1000) : 0;
     this.lastReal = now;
     this.time += realDt;
+    this.simTime += dt;
     this.hitBudget = 28;
     this.critBudget = 6;
     this.deathBudget = 10;
@@ -1144,6 +1185,7 @@ export class FxManager {
     this.ground.gain = this.gain;
     this.fire.gain = this.gain;
     this.strips.uniforms.uGain.value = this.gain;
+    this.ribbons.gain = this.gain;
     this.fire.update(dt, this.particles);
     this.particles.update(dt, realDt);
     this.ground.update(dt, realDt);

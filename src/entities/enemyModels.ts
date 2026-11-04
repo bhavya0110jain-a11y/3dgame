@@ -260,7 +260,19 @@ const RIM_COLOR = new THREE.Color(0.55, 0.62, 1.0);
  *   z = global saturation kept (1 = untouched)
  *   w = slope above the knee (0 = hard clamp, 1 = untouched)
  */
-export const ENEMY_PALETTE = new THREE.Vector4(0.75, 0.3, 0.88, 0.45);
+export const ENEMY_PALETTE = new THREE.Vector4(0.75, 0.24, 0.85, 0.3); // s3 #2: steel/bone (knight, warden) top out ~0.47
+
+/**
+ * Instance tint multiplied onto a vertex-coloured GLB body (white = as authored). Gloam Jelly's rose-pink skin is
+ * pulled to dusk violet (bubblegum → ~#4a2f78, art review s3 #5); its bubbles, eyes and inner glow are a separate
+ * glow mesh and keep their pink.
+ */
+const GLB_BODY_TINT: Partial<Record<EnemyShape, number>> = { blob: 0x4a61a6 };
+
+/** Base instance tint for a GLB (vertex-coloured) enemy body of `shape`. */
+export function glbBodyTint(shape: EnemyShape): number {
+  return GLB_BODY_TINT[shape] ?? 0xffffff;
+}
 
 /** Lit enemy body material: vertex colours + cool moonlit rim (separates enemies from the ground at
  *  night), horde palette (amber pulled cool, values mid-dark), rim-light hit flash, crimson elite aura, icy slow
@@ -315,7 +327,7 @@ export function makeEnemyBodyMaterial(vertexColors: boolean): THREE.MeshStandard
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
         float fxRim = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 2.2);
-        totalEmissiveRadiance += diffuseColor.rgb * (uRimColor * fxRim * 0.7 + 0.07);
+        totalEmissiveRadiance += diffuseColor.rgb * (uRimColor * fxRim * 0.45 + 0.05);
         totalEmissiveRadiance += vec3(1.0, 0.94, 0.85) * fxFlash * (0.1 + fxRim * 1.15);
         // elite aura: hostile crimson-magenta (gold/amber is reserved for the player's side)
         totalEmissiveRadiance += vec3(1.0, 0.22, 0.5) * (0.1 + fxRim * 2.0) * vFx.y;

@@ -85,7 +85,7 @@ class SolarCrown implements WeaponInstance {
     let total = 0;
     for (let r = 0; r < rings.length; r++) total += rings[r][0] + s.amount;
     if (this.trails.length !== total) {
-      while (this.trails.length < total) this.trails.push(ctx.fx.ribbons.alloc(0xffa830, 0.45 * Math.sqrt(s.area), 1.5));
+      while (this.trails.length < total) this.trails.push(ctx.fx.ribbons.alloc(0xffa830, 0.45 * Math.sqrt(s.area), 1.0)); // s3: 1.5 → 1.0 (white-out)
       while (this.trails.length > total) ctx.fx.ribbons.release(this.trails.pop()!);
       for (const t of this.trails) ctx.fx.ribbons.reset(t);
     }

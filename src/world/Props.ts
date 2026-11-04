@@ -248,7 +248,17 @@ export class Props {
       const bodyGeo = model?.body ?? (model?.glow ? null : fallbackGeometry(def.kind, def.color));
       const bodyMat = patchWorldMaterial(
         new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 }),
-        { wind: info.wind ?? 0, windStart: info.windStart, dither: info.dither, rim: TALL.has(def.kind) ? 0.85 : 0.45, gloom: 0.72, soften: 0.9 },
+        {
+          wind: info.wind ?? 0,
+          windStart: info.windStart,
+          dither: info.dither,
+          rim: TALL.has(def.kind) ? 0.85 : 0.45,
+          gloom: 0.72,
+          soften: 0.9,
+          // art review s3 #9: lantern-lit crowns read warm green, not mustard-olive
+          lightDesat: 0.4,
+          greenAmber: 0.5,
+        },
       );
       const body = new THREE.InstancedMesh(bodyGeo ?? new THREE.BufferGeometry(), bodyMat, cap);
       body.receiveShadow = true;

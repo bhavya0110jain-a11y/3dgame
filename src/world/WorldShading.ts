@@ -22,6 +22,9 @@ export const worldUniforms = {
 };
 
 export const GLOOM_PARS = /* glsl */ `
+  #ifndef WORLD_GREEN_AMBER
+  #define WORLD_GREEN_AMBER 1.0
+  #endif
   uniform vec3 uPlayer;
   uniform float uLightR;
   uniform float uTime;
@@ -61,7 +64,9 @@ export const GLOOM_PARS = /* glsl */ `
     vec3 amber = vec3(l2) * vec3(1.78, 0.8, 0.3);
     float greenish = saturate((col.g - max(col.r, col.b)) * 2.0 / max(l2, 1e-3));
     float reddish = saturate((col.r - 2.6 * col.g) / max(col.r, 1e-3) * 1.6) * (1.0 - greenish);
-    vec3 warm = mix(sat, amber, 0.5 + 0.4 * max(greenish, reddish)) * vec3(1.03, 0.97, 0.88);
+    // WORLD_GREEN_AMBER < 1 (props): lantern-lit crowns keep a warm green instead of turning mustard-khaki
+    float amberW = (0.5 + 0.4 * max(greenish, reddish)) * mix(1.0, WORLD_GREEN_AMBER, greenish);
+    vec3 warm = mix(sat, amber, amberW) * vec3(1.03, 0.97, 0.88);
     col = mix(col, warm, inside * scale);
     return col;
   }
@@ -92,10 +97,33 @@ export interface WorldPatchOptions {
    * 0 = off; ~1 = strong.
    */
   soften?: number;
+  /**
+   * Inside the lantern pool, mix the incoming DIRECT light this far towards its own luminance (lit materials with
+   * soften > 0 only). Amber light × green albedo multiplies out to mustard; partly desaturating the light (never the
+   * albedo) keeps lantern-lit crowns a warm green. 0 = off.
+   */
+  lightDesat?: number;
+  /**
+   * Lantern hotspot compression: direct light (diffuse + specular) is scaled by this factor right under the lantern,
+   * easing back to 1 by ~4.5 m. The lantern hangs ~2.3 m up, so its inverse-square peak made the ground under the
+   * bearer the brightest surface in the game (art review s3 #8). 1 / undefined = off.
+   */
+  hotspot?: number;
+  /** Scales the pool's amber re-expression of green albedo (1 = full; props use less so foliage stays green). */
+  greenAmber?: number;
 }
 
 const SOFTEN_FRAGMENT = /* glsl */ `
   {
+    #if WORLD_LIGHT_DESAT > 0
+    {
+      vec3 sAlb = max(diffuseColor.rgb, vec3(0.02));
+      vec3 sL = reflectedLight.directDiffuse / sAlb;
+      float sPool = 1.0 - gloomFactor(vGWorld);
+      sL = mix(sL, vec3(dot(sL, vec3(0.2126, 0.7152, 0.0722))), float(WORLD_LIGHT_DESAT) * 0.01 * sPool);
+      reflectedLight.directDiffuse = sAlb * sL;
+    }
+    #endif
     vec3 dd = reflectedLight.directDiffuse;
     float dm = max(dd.r, max(dd.g, dd.b));
     float k = 1.0 + max(dm - 0.3, 0.0) * WORLD_SOFTEN;
@@ -150,8 +178,9 @@ const WORLD_POS_VERTEX = /* glsl */ `
  * Occlusion cut-away for tall props (crowns, pillars, walls) between the camera and the bearer. A capsule around
  * the camera→bearer segment is cleared with a 4×4 ordered Bayer halftone at a 2-px cell: inside 2.8 m (scaled with
  * the camera distance, so zooming out widens it) every fragment is discarded, and the 2.8–5.5 m band ramps out as a
- * clean halftone instead of static. Low crowns fade too (height gate 0.4–1.2 m); the near-camera end and the
- * bearer's own feet are spared (t gate) so the ground-level silhouette of a trunk next to her stays.
+ * clean halftone instead of static. Only fragments above ~1.2 m (height gate 0.9–1.5 m) and clearly in front of
+ * her (≥ ~0.7–1.6 m along the ray towards the camera) are cut, so low walls, stones and trunks beside or behind her
+ * keep their solid silhouette; the stencil x-ray (Player.ts) shows her through whatever is left.
  */
 const DITHER_FRAGMENT = /* glsl */ `
   {
@@ -162,7 +191,8 @@ const DITHER_FRAGMENT = /* glsl */ `
     float dist = length(vGWorld - (a + ab * t));
     // 23.5 m = camera→focus distance at zoom 1 (CameraRig HEIGHT/BACK); menu close-ups shrink the capsule
     float occS = clamp(sqrt(abl2) / 23.5, 0.35, 1.6);
-    float fade = (1.0 - smoothstep(2.8 * occS, 5.5 * occS, dist)) * smoothstep(0.015, 0.06, t) * smoothstep(0.4, 1.2, vGWorld.y);
+    float ahead = t * sqrt(abl2); // metres from her chest towards the camera
+    float fade = (1.0 - smoothstep(2.8 * occS, 5.5 * occS, dist)) * smoothstep(0.7, 1.6, ahead) * smoothstep(0.9, 1.5, vGWorld.y);
     if (fade > bayer4x4(floor(gl_FragCoord.xy * 0.5)) + 0.03125) discard;
   }
 `;
@@ -174,13 +204,21 @@ export function patchWorldMaterial<T extends THREE.Material>(mat: T, opts: World
   const dither = !!opts.dither;
   const rim = opts.rim ?? 0;
   const soften = opts.soften ?? 0;
+  const desat = Math.round((opts.lightDesat ?? 0) * 100);
+  const greenAmber = opts.greenAmber ?? 1;
+  const hotspot = opts.hotspot ?? 1;
+  const hotFrag =
+    hotspot < 1
+      ? `\n{ float hs = mix(${hotspot.toFixed(3)}, 1.0, smoothstep(0.2, 4.5, length(vGWorld.xz - uPlayer.xz)));\n  reflectedLight.directDiffuse *= hs; reflectedLight.directSpecular *= hs; }`
+      : '';
+  const head = greenAmber !== 1 ? `#define WORLD_GREEN_AMBER ${greenAmber.toFixed(3)}\n` : '';
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, renderer) => {
     prev?.call(mat, shader, renderer);
     Object.assign(shader.uniforms, worldUniforms);
     if (rim > 0) shader.uniforms.uRimTint = rimUniforms.uRimTint;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\n${GLOOM_PARS}\nvarying vec3 vGWorld;`)
+      .replace('#include <common>', `#include <common>\n${head}${GLOOM_PARS}\nvarying vec3 vGWorld;`)
       .replace(
         '#include <project_vertex>',
         (wind > 0
@@ -190,12 +228,14 @@ export function patchWorldMaterial<T extends THREE.Material>(mat: T, opts: World
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        `#include <common>\n${GLOOM_PARS}\nvarying vec3 vGWorld;` +
+        `#include <common>\n${head}${GLOOM_PARS}\nvarying vec3 vGWorld;` +
           (rim > 0 ? `\nuniform vec3 uRimTint;\n#define WORLD_RIM ${rim.toFixed(3)}` : ''),
       )
       .replace(
         '#include <lights_fragment_end>',
-        soften > 0 ? `#include <lights_fragment_end>\n#define WORLD_SOFTEN ${soften.toFixed(3)}\n${SOFTEN_FRAGMENT}` : '#include <lights_fragment_end>',
+        soften > 0
+          ? `#include <lights_fragment_end>${hotFrag}\n#define WORLD_SOFTEN ${soften.toFixed(3)}\n#define WORLD_LIGHT_DESAT ${desat}\n${SOFTEN_FRAGMENT}`
+          : `#include <lights_fragment_end>${hotFrag}`,
       )
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${dither ? DITHER_FRAGMENT : ''}`)
       .replace(
@@ -203,7 +243,7 @@ export function patchWorldMaterial<T extends THREE.Material>(mat: T, opts: World
         `outgoingLight = applyGloom(outgoingLight, vGWorld, ${gloom.toFixed(3)});\n${rim > 0 ? RIM_FRAGMENT : ''}#include <opaque_fragment>`,
       );
   };
-  const key = `world:${wind}:${gloom}:${dither}:${rim}:${soften}`;
+  const key = `world:${wind}:${gloom}:${dither}:${rim}:${soften}:${desat}:${greenAmber}:${hotspot}`;
   const prevKey = mat.customProgramCacheKey.bind(mat);
   mat.customProgramCacheKey = () => prevKey() + key;
   return mat;

@@ -57,6 +57,11 @@ export class Renderer {
   readonly rig: CameraRig;
   readonly post: PostPipeline;
   damagePulse = 0;
+  /**
+   * FX brightness-governor source for bloom (FxManager exposes `brightness`: 1 = calm … ~0.3 = saturated). Game
+   * sets it (`renderer.bloomSource = fx`); until it does, render() feature-detects the running game's fx.
+   */
+  bloomSource: { readonly brightness?: number } | null = null;
   /** Set false to pin the chosen tier (no dynamic resolution / tier fallback). */
   autoQuality = !(typeof navigator !== 'undefined' && navigator.webdriver);
 
@@ -177,6 +182,8 @@ export class Renderer {
     // BUG-QA-014: reduced flashing dims the full-screen damage pulse
     u.uDamage.value = this.damagePulse * (document.documentElement.classList.contains('a11y-noflash') ? 0.35 : 1);
     u.uTime.value = time % 100;
+    const src = this.bloomSource ?? (typeof window !== 'undefined' ? (window as { __game?: { fx?: { brightness?: number } } }).__game?.fx : undefined);
+    this.post.setBloomGovernor(src?.brightness ?? 1);
     this.post.render(dt);
     this.trackFrameTime();
   }

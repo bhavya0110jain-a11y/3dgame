@@ -729,3 +729,41 @@ describe('Game S3 QA: outro under pause, x-ray toggle', () => {
     expect(player.xray).toBe(false);
   });
 });
+
+describe('Game S3 final: boss outro (BUG-QA-025 / 026)', () => {
+  const advance = (game: Priv, seconds: number) => {
+    game.debug.timeScale = seconds / 0.05;
+    internals(game).last = performance.now() - 1000;
+    tick(game);
+    game.debug.timeScale = 1;
+  };
+  const priv = (game: Priv) => game as unknown as { outroT: number; slowT: number };
+
+  it('chestOpenedDuringOutro_waitsForCollapse_thenOpens', () => {
+    // Arrange: the night's master falls, the outro is running
+    const game = newGame();
+    const boss = game.enemies.spawn('boss_hollow_stag', 0, -18, {})!;
+    game.enemies.kill(boss, game);
+    expect(priv(game).outroT).toBeGreaterThan(0);
+    // Act: a reliquary is collected mid-collapse
+    game.events.emit('chest:opened', {} as never);
+    // Assert: the collapse keeps playing
+    expect(game.state).toBe('playing');
+    // …and the reliquary opens once the outro is over
+    for (let i = 0; i < 4 && game.state === 'playing'; i++) advance(game, 1.5);
+    expect(game.state).toBe('levelup');
+    expect(game.levelMode).toBe('chest');
+  });
+
+  it('outroEnds_unusedSlowMo_isCleared', () => {
+    // Arrange
+    const game = newGame();
+    const boss = game.enemies.spawn('boss_hollow_stag', 0, -18, {})!;
+    game.enemies.kill(boss, game);
+    // Act: big sim steps burn the outro in game time while barely touching the real-time slow-mo
+    for (let i = 0; i < 4 && priv(game).outroT > 0; i++) advance(game, 1.5);
+    // Assert
+    expect(priv(game).outroT).toBeLessThanOrEqual(0);
+    expect(priv(game).slowT).toBe(0);
+  });
+});

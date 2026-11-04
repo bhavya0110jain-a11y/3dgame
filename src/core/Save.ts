@@ -21,7 +21,8 @@ export interface SaveData {
     musicVolume: number;
     sfxVolume: number;
     screenShake: boolean;
-    damageNumbers: boolean;
+    /** 'all' | 'crits' (critical hits only) | 'off'. Pre-sprint-3 saves stored a boolean; sanitizeSave maps it. */
+    damageNumbers: DamageNumbersMode;
     quality: QualityTier;
     showFps: boolean;
     /** Show first-run onboarding hints (only active while save.runs < TUTORIAL_RUNS). */
@@ -33,6 +34,17 @@ export interface SaveData {
 export const QUALITY_TIERS = ['low', 'medium', 'high'] as const;
 export type QualityTier = (typeof QUALITY_TIERS)[number];
 export const DEFAULT_QUALITY: QualityTier = 'high';
+/** Damage-number display modes (art review s3 #12). */
+export const DAMAGE_NUMBER_MODES = ['all', 'crits', 'off'] as const;
+export type DamageNumbersMode = (typeof DAMAGE_NUMBER_MODES)[number];
+
+/** Coerces a stored damage-number setting: legacy true → 'all', false → 'off', unknown → 'all'. */
+export function safeDamageNumbers(v: unknown): DamageNumbersMode {
+  if (v === false) return 'off';
+  if (v === true) return 'all';
+  return (DAMAGE_NUMBER_MODES as readonly unknown[]).includes(v) ? (v as DamageNumbersMode) : 'all';
+}
+
 /** Onboarding hints are emitted only while the save has fewer than this many finished runs. */
 export const TUTORIAL_RUNS = 2;
 
@@ -63,7 +75,7 @@ export function defaultSave(): SaveData {
       musicVolume: 0.6,
       sfxVolume: 0.8,
       screenShake: true,
-      damageNumbers: true,
+      damageNumbers: 'all',
       quality: 'high',
       showFps: false,
       hints: true,
@@ -124,7 +136,7 @@ export function sanitizeSave(p: Record<string, unknown>): SaveData {
       musicVolume: Math.min(1, Math.max(0, num(ps.musicVolume, ds.musicVolume))),
       sfxVolume: Math.min(1, Math.max(0, num(ps.sfxVolume, ds.sfxVolume))),
       screenShake: bool(ps.screenShake, ds.screenShake),
-      damageNumbers: bool(ps.damageNumbers, ds.damageNumbers),
+      damageNumbers: safeDamageNumbers(ps.damageNumbers),
       quality: safeQuality(ps.quality),
       showFps: bool(ps.showFps, ds.showFps),
       hints: bool(ps.hints, ds.hints),

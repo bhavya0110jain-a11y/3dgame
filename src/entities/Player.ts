@@ -84,24 +84,29 @@ function softenDirectLight(mat: THREE.MeshStandardMaterial): void {
   mat.customProgramCacheKey = () => 'bearer-soft-light';
 }
 
-/** Pulls the x-ray copy this far (m) towards the camera along the view ray: the bearer's own overlapping parts
- *  (cape behind body, arm in front of robe) are never further apart than this, so they don't x-ray themselves.
- *  Scaling the whole view-space position keeps the projected silhouette pixel-identical. */
-const XRAY_PULL = 0.9;
+/** Most silhouette draws the x-ray may add (BUG-QA-022): each animated part's primitives are merged into one
+ *  geometry, then only the largest parts (body, staff, cape, head) are kept; feet and the cage add nothing to the
+ *  outline at gameplay distance. */
+const XRAY_MAX_PARTS = 4;
+/** Stencil value the bearer's visible fragments write (the scene render targets carry a stencil buffer). */
+const BEARER_STENCIL = 1;
 
 /**
- * Occlusion silhouette (art review P0 #2 part 2): every bearer mesh is drawn a second time with GreaterDepth, so
- * wherever a crown, wall, boss body or crowd covers her, a warm #ffd9a0 silhouette (brighter at the rim) shows
- * through. Shares the body geometry and inherits the animated part transforms (child of each mesh).
+ * Occlusion silhouette (art review s3 P1 #3): the bearer's lit materials write stencil 1 wherever they pass the depth
+ * test, and render after every other opaque object (renderOrder 1), so stencil 1 marks exactly the pixels where she
+ * is visible. The x-ray copy then draws with no depth test wherever the stencil is NOT 1: every part of her that a
+ * crown, wall, boss body or a hugging crowd covers shows as a saturated amber silhouette, however close the
+ * occluder (the old depth-offset version failed for anything within 0.9 m of her, i.e. contact-range enemies).
+ * It also replaces the stencil as it draws, so overlapping parts blend once (a flat, clean silhouette).
+ * Amber #ffb347, not the old cream #ffd9a0, which was nearly the enemies' hit-flash colour.
  */
 const xrayMaterial = new THREE.ShaderMaterial({
-  uniforms: { uColor: { value: new THREE.Color(0xffd9a0) }, uOpacity: { value: 0.55 } },
+  uniforms: { uColor: { value: new THREE.Color(0xffb347) }, uOpacity: { value: 0.85 } },
   vertexShader: /* glsl */ `
     varying vec3 vN;
     varying vec3 vV;
     void main() {
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
-      mv.xyz *= (mv.z + ${XRAY_PULL.toFixed(2)}) / min(mv.z, -1.0);
       vN = normalize(normalMatrix * normal);
       vV = normalize(-mv.xyz);
       gl_Position = projectionMatrix * mv;
@@ -113,17 +118,49 @@ const xrayMaterial = new THREE.ShaderMaterial({
     varying vec3 vV;
     void main() {
       float rim = 1.0 - abs(dot(normalize(vN), normalize(vV)));
-      gl_FragColor = vec4(uColor * (0.75 + 0.6 * rim), uOpacity * (0.55 + 0.45 * rim));
+      // fill alpha 0.2, rim alpha 0.85 (uOpacity): reads as a lit outline, not a solid amber cut-out
+      gl_FragColor = vec4(uColor * (0.8 + 0.5 * rim), uOpacity * (0.235 + 0.765 * rim));
     }`,
   transparent: true,
   depthWrite: false,
-  depthFunc: THREE.GreaterDepth,
+  depthTest: false,
+  stencilWrite: true,
+  stencilRef: BEARER_STENCIL,
+  stencilFunc: THREE.NotEqualStencilFunc,
+  stencilFail: THREE.KeepStencilOp,
+  stencilZFail: THREE.KeepStencilOp,
+  stencilZPass: THREE.ReplaceStencilOp,
   fog: false,
 });
+
+/** Bearer materials mark their visible pixels in the stencil buffer (read by xrayMaterial). */
+function markStencil(mat: THREE.Material): void {
+  mat.stencilWrite = true;
+  mat.stencilRef = BEARER_STENCIL;
+  mat.stencilFunc = THREE.AlwaysStencilFunc;
+  mat.stencilZPass = THREE.ReplaceStencilOp;
+  mat.stencilFail = THREE.KeepStencilOp;
+  mat.stencilZFail = THREE.KeepStencilOp;
+}
+
+/** Position + normal only, non-indexed, transformed by `m` (x-ray geometry shares nothing else). */
+function xrayGeometry(src: THREE.BufferGeometry, m: THREE.Matrix4): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', src.getAttribute('position'));
+  const n = src.getAttribute('normal');
+  if (n) g.setAttribute('normal', n);
+  if (src.index) g.setIndex(src.index);
+  const out = g.index ? g.toNonIndexed() : g.clone();
+  if (!out.getAttribute('normal')) out.computeVertexNormals();
+  out.applyMatrix4(m);
+  return out;
+}
 
 /** Red lanterns (Pyre) would paint a red pool around a red-robed bearer: the ground light is nudged towards
  *  amber-orange while the lantern glass and weapons keep the character colour. */
 const POOL_HUE_MIN = 0.075;
+/** ...and is remapped to this hue (34°): at 0.075 the Pyre pool still measured 16° on the Ruins cobble (s3 #7). */
+const POOL_HUE_TARGET = 0.095;
 
 export class Player {
   readonly group = new THREE.Group();
@@ -193,21 +230,52 @@ export class Player {
 
   private mountRig(): void {
     this.body.add(this.rig.root);
-    // x-ray silhouette copies of every visible body part (not the light glass / eyes)
-    for (const m of this.xray) m.removeFromParent();
+    // x-ray silhouette: one merged copy per animated part (not the light glass / eyes), largest parts only
+    for (const m of this.xray) {
+      m.removeFromParent();
+      m.geometry.dispose();
+    }
     this.xray.length = 0;
-    const parts: THREE.Mesh[] = [];
+    const tops = new Set<THREE.Object3D>([this.rig.root]);
+    if (this.rig.root.userData.glb && this.rig.root.children[0]) tops.add(this.rig.root.children[0]);
+    const owners = new Map<THREE.Object3D, THREE.Mesh[]>();
     this.rig.root.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh && m.material !== xrayMaterial && !(m.material as THREE.Material & { isMeshBasicMaterial?: boolean }).isMeshBasicMaterial) parts.push(m);
+      if (!m.isMesh || m.material === xrayMaterial) return;
+      if ((m.material as THREE.Material & { isMeshBasicMaterial?: boolean }).isMeshBasicMaterial) return;
+      markStencil(m.material as THREE.Material);
+      m.renderOrder = 1; // after every other opaque object, so her stencil marks only truly visible pixels
+      // owner = the animated node the mesh moves with (a multi-primitive GLB node is a Group of meshes)
+      const owner = m.parent && !tops.has(m.parent) ? m.parent : m;
+      let list = owners.get(owner);
+      if (!list) owners.set(owner, (list = []));
+      list.push(m);
     });
-    for (const m of parts) {
-      const x = new THREE.Mesh(m.geometry, xrayMaterial);
+    const merged: { owner: THREE.Object3D; geo: THREE.BufferGeometry; r: number }[] = [];
+    const rel = new THREE.Matrix4();
+    const inv = new THREE.Matrix4();
+    this.rig.root.updateMatrixWorld(true);
+    for (const [owner, meshes] of owners) {
+      inv.copy(owner.matrixWorld).invert();
+      const geos = meshes.map((m) => xrayGeometry(m.geometry, rel.multiplyMatrices(inv, m.matrixWorld)));
+      const geo = geos.length === 1 ? geos[0] : mergeGeometries(geos);
+      if (geos.length > 1) for (const g of geos) g.dispose();
+      if (!geo) continue;
+      geo.computeBoundingSphere();
+      merged.push({ owner, geo, r: geo.boundingSphere?.radius ?? 0 });
+    }
+    merged.sort((a, b) => b.r - a.r);
+    for (const [i, part] of merged.entries()) {
+      if (i >= XRAY_MAX_PARTS) {
+        part.geo.dispose();
+        continue;
+      }
+      const x = new THREE.Mesh(part.geo, xrayMaterial);
       x.renderOrder = 10;
       x.castShadow = false;
       x.receiveShadow = false;
-      x.frustumCulled = m.frustumCulled;
-      m.add(x);
+      x.frustumCulled = false;
+      part.owner.add(x);
       this.xray.push(x);
     }
     // Light sits above the lantern (not inside it) so the bearer is lit, not blown out, by it.
@@ -532,7 +600,7 @@ export class Player {
     this.light.color.copy(this.lightColor);
     this.light.color.getHSL(tmpHsl);
     if (tmpHsl.s > 0.3 && (tmpHsl.h < POOL_HUE_MIN || tmpHsl.h > 0.94)) {
-      this.light.color.setHSL(POOL_HUE_MIN, tmpHsl.s, Math.max(tmpHsl.l, 0.64));
+      this.light.color.setHSL(POOL_HUE_TARGET, tmpHsl.s, Math.max(tmpHsl.l, 0.64));
     }
     const s = 0.94 + 0.08 * frac + Math.sin(time * 20) * 0.02;
     this.lantern.scale.set(s, 1, s);

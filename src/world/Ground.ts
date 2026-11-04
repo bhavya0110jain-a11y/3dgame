@@ -150,11 +150,16 @@ export class Ground {
         )
         // the moon sits almost exactly in the gameplay camera's mirror direction: damp the water's direct specular so
         // the pools read as dark still water with a few glints, not a sheet of glitter brighter than the lantern pool
-        .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directSpecular *= 1.0 - 0.88 * gWater;')
+        .replace(
+          '#include <lights_fragment_end>',
+          `#include <lights_fragment_end>
+          reflectedLight.directSpecular *= 1.0 - 0.88 * gWater;`,
+        )
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += gEmit;');
     };
     this.material.customProgramCacheKey = () => 'll-ground';
-    patchWorldMaterial(this.material, { gloom: 1 });
+    // hotspot: art review s3 #8, the peak right under the lantern was the brightest ground in the game (#fcd895)
+    patchWorldMaterial(this.material, { gloom: 1, hotspot: 0.5 });
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), this.material);
     this.mesh.rotation.x = -Math.PI / 2;
     this.mesh.receiveShadow = true;

@@ -4,6 +4,7 @@ import { SpatialHash } from '../core/SpatialHash';
 import {
   buildEnemyModel,
   buildEnemyLodModel,
+  glbBodyTint,
   makeEnemyBodyMaterial,
   makeEnemyGlowMaterial,
   withEnemyFx,
@@ -15,6 +16,7 @@ import {
   type EnemyModel,
 } from './enemyModels';
 import type { GameContext } from '../game/types';
+import { showDamageNumber } from '../render/vfx/damageNumbers';
 
 export interface Enemy {
   id: number;
@@ -257,7 +259,7 @@ export class EnemyManager {
     const hi = this.makePart(def, model, capacity);
     const loModel = def.boss ? null : buildEnemyLodModel(def.shape);
     const lo = loModel ? this.makePart(def, loModel, capacity) : null;
-    b = { def, tint: model.vertexColors ? 0xffffff : def.color, hi, lo, cur: hi, capacity, n: 0 };
+    b = { def, tint: model.vertexColors ? glbBodyTint(def.shape) : def.color, hi, lo, cur: hi, capacity, n: 0 };
     this.batches.set(def.id, b);
     return b;
   }
@@ -435,7 +437,8 @@ export class EnemyManager {
     }
     // VFX: directional impact sparks (also tags the next damage number with the source's colour)
     ctx.fx.hit(e.x, 0.9 * e.scale, e.z, opts.fromX !== undefined ? e.x - opts.fromX : 0, opts.fromZ !== undefined ? e.z - opts.fromZ : 0, src, crit, e.scale);
-    if (ctx.save.settings.damageNumbers && (crit || this.activeCount <= NUMBERS_CROWD)) {
+    // setting: legacy boolean or 'all' | 'crits' | 'off' (see render/vfx/damageNumbers)
+    if (showDamageNumber(ctx.save.settings.damageNumbers, crit, this.activeCount, NUMBERS_CROWD)) {
       const shown = warded && dmg <= 0 ? amount : dmg;
       const cls = crit ? 'ft-crit' : warded ? 'ft-blue' : opts.color ?? '';
       // hits on the same enemy within the merge window add up in one number instead of stacking new ones
@@ -798,7 +801,7 @@ export class EnemyManager {
       ctx.events.emit('boss:enraged', { defId: def.id });
       ctx.fx.ring(e.x, e.z, 0xff3a3a, 1, 14, 0.9);
       ctx.fx.burst(e.x, 2, e.z, 0xff3a3a, 90, 10, 1);
-      ctx.fx.text(e.x, 4.5, e.z, 'ENRAGED', 'ft-big');
+      // no Fx 'ENRAGED' banner: Game's boss:enraged handler announces it through the UI queue (BUG-QA-023)
       ctx.shake(0.8);
       this.knockbackAll(e.x, e.z, 8, 14);
       e.timer = Math.min(e.timer, 1);

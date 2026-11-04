@@ -130,7 +130,7 @@ export function simulateRun(opts: SimOptions = {}): SimResult {
   const scene = new THREE.Scene();
   const events = new EventBus();
   const save: SaveData = defaultSave();
-  save.settings.damageNumbers = false;
+  save.settings.damageNumbers = 'off';
   save.unlocked.push(...(opts.unlocked ?? []));
   save.meta = { ...(opts.meta ?? {}) };
   const player = new SimPlayer();

@@ -28,7 +28,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 /** Ember color by value tier. */
 function emberColor(v: number): number {
-  if (v >= 50) return 0xff3a6a;
+  if (v >= 50) return 0xffd27a; // s3: gold (player family), was red-pink next to the hostile-signal colours
   if (v >= 10) return 0x6ab0ff;
   if (v >= 3) return 0x6aff8a;
   return 0xffb347;
@@ -247,10 +247,11 @@ export class PickupManager {
     let ne = 0, no = 0, nc = 0, nb = 0, na = 0;
     const g = this.glows;
     g.begin(time);
-    // a late-game field of hundreds of gems must not read as confetti over the fight: past ~120 pickups every gem
-    // and halo dims (down to 55%) and glints stop
-    const crowd = 1 - 0.45 * Math.min(1, Math.max(0, (this.list.length - 120) / 280));
+    // a late-game field of hundreds of gems must not read as confetti over the fight (art review s3 #6): past 60
+    // pickups every gem and halo dims (down to 40%), glints stop at 200 and halos are skipped above 200
+    const crowd = 1 - 0.6 * Math.min(1, Math.max(0, (this.list.length - 60) / 240));
     const glints = this.list.length < 200;
+    const halos = this.list.length <= 200;
     for (const p of this.list) {
       const bob = Math.sin(p.phase * 3) * 0.1;
       const pulse = Math.sin(p.phase * 5);
@@ -265,10 +266,10 @@ export class PickupManager {
           tmpS.setScalar(s * (1 + 0.08 * pulse));
           tmpM.compose(tmpP, tmpQ, tmpS);
           this.emberMesh.setMatrixAt(ne, tmpM);
-          tmpC.setHex(col).multiplyScalar((1.9 + 0.5 * pulse) * crowd);
+          tmpC.setHex(col).multiplyScalar((1.4 + 0.3 * pulse) * crowd);
           this.emberMesh.setColorAt(ne, tmpC);
           ne++;
-          g.add(p.x, y, p.z, 0.8 * s, Frame.GLOW, col, (0.42 + 0.14 * pulse) * crowd);
+          if (halos) g.add(p.x, y, p.z, 0.8 * s, Frame.GLOW, col, (0.42 + 0.14 * pulse) * crowd);
           // periodic glint (each ember on its own phase)
           const gl = glints ? Math.sin(p.phase * 1.9 + p.x * 0.7 + p.z * 0.3) : 0;
           if (gl > 0.9) {

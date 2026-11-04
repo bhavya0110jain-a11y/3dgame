@@ -3,6 +3,7 @@ import type { GameContext } from '../game/types';
 import type { Enemy } from './Enemies';
 import { Frame } from '../render/vfx/atlas';
 import { PF_BOUNCE, PF_FLICKER, PF_SOFTFADE } from '../render/vfx/Particles';
+import { focusFactor } from '../render/vfx/focus';
 import { createProjectileBillboards, createShardGeometry, PS_BEAM, PS_COMET, PS_FROST, PS_MARKER, PS_MOTH, PS_VOID } from '../render/vfx/projectileVisuals';
 
 export interface Projectile {
@@ -99,6 +100,9 @@ export class ProjectileManager {
   private readonly capacity = 1500;
   private bb: ReturnType<typeof createProjectileBillboards>;
   private shards: THREE.InstancedMesh;
+  /** Bearer position this frame: the bearer's own shots dim/shrink near her (focus protection, BUG-QA-029). */
+  private focusX = 1e9;
+  private focusZ = 1e9;
   private attrs: THREE.InstancedBufferAttribute[];
   private time = 0;
 
@@ -173,6 +177,8 @@ export class ProjectileManager {
     const fx = ctx.fx;
     this.fxRef = fx;
     fx.setFocus(player.x, player.z);
+    this.focusX = player.x;
+    this.focusZ = player.z;
     const gain = fx.brightness ?? 1;
     this.bb.uniforms.uGain.value = gain;
     (this.shards.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.6 * gain;
@@ -347,7 +353,9 @@ export class ProjectileManager {
       const sc = p.scale;
       const speed = Math.hypot(p.vx, p.vz);
       // fade in over the first few frames of a long-lived shot (no pop at the muzzle), out at end of life
-      const alpha = Math.min(1, p.life * 6);
+      // the bearer's own volleys (Glacier Heart ring, Beacon Ray spokes) start on her: same falloff as every VFX layer
+      const fk = p.hostile ? 1 : focusFactor(p.x - this.focusX, p.z - this.focusZ);
+      const alpha = Math.min(1, p.life * 6) * fk;
       tmpC.setHex(p.color);
       let size = 0.22 * sc;
       let tail = 0;
@@ -356,7 +364,7 @@ export class ProjectileManager {
       switch (style) {
         case V_EMBER: size = 0.26 * sc; tail = Math.min(2.4, speed * 0.11) * sc; st = PS_COMET; inten = 2.8; break;
         case V_BEAM: size = 0.24 * sc; tail = Math.min(5.5, speed * 0.24) * sc; st = PS_BEAM; inten = 2.4 / Math.max(1, sc * 0.75); break;
-        case V_SPEAR: size = 0.24 * sc; tail = Math.min(2.6, speed * 0.12) * sc; st = PS_BEAM; inten = 1.9; break;
+        case V_SPEAR: size = 0.22 * sc; tail = Math.min(1.8, speed * 0.1) * sc; st = PS_BEAM; inten = 1.3; break; // s3: a volley fan read as a white starburst
         case V_MOTH: size = 0.6 * sc; tail = Math.min(0.9, speed * 0.06) * sc; st = PS_MOTH; inten = 1.6; break;
         case V_SHARD: size = 0.34 * sc; tail = Math.min(1.8, speed * 0.12) * sc; st = PS_FROST; inten = 2.6; tmpC.setHex(0x4ab8ff); break;
         case V_HOSTILE: size = 0.32 * sc; tail = Math.min(1.2, speed * 0.12); st = PS_VOID; inten = 2.2; break;
@@ -382,7 +390,7 @@ export class ProjectileManager {
         tmpQ2.setFromAxisAngle(AXIS_X, this.time * 9 + (p.seed ?? 0) * 6.28);
         tmpQ.multiply(tmpQ2);
         tmpV.set(p.x, p.y, p.z);
-        tmpS.set(1.25 * sc, 1.1 * sc, 1.1 * sc);
+        tmpS.set(1.25 * sc, 1.1 * sc, 1.1 * sc).multiplyScalar(0.35 + 0.65 * fk);
         tmpM.compose(tmpV, tmpQ, tmpS);
         this.shards.setMatrixAt(ns++, tmpM);
       }

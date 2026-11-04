@@ -55,7 +55,7 @@ function recordingFx() {
 
 function makeCtx(fx: unknown = anyObj) {
   const save = defaultSave();
-  save.settings.damageNumbers = true;
+  save.settings.damageNumbers = 'all';
   const hits: number[] = [];
   const player = { x: 0, z: 0, vx: 0, vz: 0, radius: 0.5, lightValue: 100, invuln: 0, dead: false, damage: (a: number) => hits.push(a), heal: noop };
   const ctx = {

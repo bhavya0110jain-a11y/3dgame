@@ -9,6 +9,16 @@ import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import { GradeShader } from './GradeShader';
 
+/** Bloom at a calm frame (governor gain 1) and at a fully loaded one (gain ≤ 0.3). */
+export const BLOOM_CALM = { strength: 0.62, threshold: 0.92 };
+export const BLOOM_LOADED = { strength: 0.35, threshold: 1.15 };
+
+/** Governor gain → bloom blend factor k in [0, 1] (0 = loaded, 1 = calm). Non-finite input counts as calm. */
+export function bloomK(gain: number): number {
+  if (!Number.isFinite(gain)) return 1;
+  return Math.min(1, Math.max(0, (gain - 0.3) / 0.7));
+}
+
 export interface PostQuality {
   /** Ambient occlusion: off, half resolution (depth-aware upsample) or full resolution. */
   ao: 'off' | 'half' | 'full';
@@ -45,7 +55,12 @@ export class PostPipeline {
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
     const w = Math.max(1, window.innerWidth);
     const h = Math.max(1, window.innerHeight);
-    this.composer = new EffectComposer(renderer);
+    // The scene targets carry a stencil buffer: the bearer writes stencil 1 where she is visible and her x-ray
+    // silhouette only draws where she is not (Player.ts, art review s3 P1 #3). With AO on, N8AO renders the scene
+    // into its own beauty target, so that one gets a depth-stencil attachment too (configuration.stencil).
+    const sz = renderer.getDrawingBufferSize(new THREE.Vector2());
+    const rt = new THREE.WebGLRenderTarget(Math.max(1, sz.x), Math.max(1, sz.y), { type: THREE.HalfFloatType, stencilBuffer: true });
+    this.composer = new EffectComposer(renderer, rt);
 
     this.renderPass = new RenderPass(scene, camera);
     this.composer.addPass(this.renderPass);
@@ -58,6 +73,7 @@ export class PostPipeline {
       c.intensity = 3.2;
       c.color = new THREE.Color(0x0d0a26); // tinted (blue-violet) occlusion: night shadows have colour
       c.screenSpaceRadius = false;
+      c.stencil = true; // bearer x-ray silhouette (see above)
       c.transparencyAware = false; // particles/ghosts are additive & depthWrite:false; skip 2 extra scene renders
       ao.autoDetectTransparency = false; // ...and the per-frame scene traversal that would re-enable it
       ao.setQualityMode('Medium');
@@ -67,7 +83,7 @@ export class PostPipeline {
       console.warn('[render] N8AO unavailable, continuing without AO', err);
     }
 
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.62, 0.55, 0.92);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), BLOOM_CALM.strength, 0.55, BLOOM_CALM.threshold);
     this.composer.addPass(this.bloom);
     this.output = new OutputPass();
     this.composer.addPass(this.output);
@@ -123,6 +139,17 @@ export class PostPipeline {
     (this.fxaa.material.uniforms.resolution.value as THREE.Vector2).set(1 / this.pw, 1 / this.ph);
     this.grade.uniforms.uAspect.value = w / Math.max(1, h);
     this.apply();
+  }
+
+  /**
+   * Drives bloom from the FX brightness governor (1 = calm … ~0.3 = screen full of additive light), art review s3
+   * P1 #1b: k = clamp((gain - 0.3) / 0.7), strength = 0.35 + 0.27k, threshold = 1.15 - 0.23k. A calm frame keeps
+   * the authored 0.62 / 0.92 glow; a saturated horde frame blooms far less and only from the hottest cores.
+   */
+  setBloomGovernor(gain: number): void {
+    const k = bloomK(gain);
+    this.bloom.strength = BLOOM_LOADED.strength + (BLOOM_CALM.strength - BLOOM_LOADED.strength) * k;
+    this.bloom.threshold = BLOOM_LOADED.threshold + (BLOOM_CALM.threshold - BLOOM_LOADED.threshold) * k;
   }
 
   render(dt: number): void {

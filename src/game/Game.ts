@@ -132,6 +132,8 @@ export class Game implements GameContext {
   private slowT = 0;
   /** Boss id of the last kill that will open the dawn choice. */
   private dawnBoss = '';
+  /** BUG-QA-025: a reliquary collected during the boss outro opens once the collapse has played. */
+  private chestQueued = false;
   /** What the last reliquary gave (null before the first one this run). */
   lastChest: ChestReveal | null = null;
   /** Context for the dawn/endless screen (set when it opens). */
@@ -156,6 +158,9 @@ export class Game implements GameContext {
     this.pickups = new PickupManager(this.scene);
     this.ui = new UI(this);
     this.fx = new FxManager(this.scene, this.camera, this.ui.fxLayer);
+    // BUG-QA-023: legacy Fx 'ft-big' banners ('REKINDLED', …) go through the one UI announcer queue (feature-detected)
+    const fxs = this.fx as unknown as { bannerSink?: ((s: string) => void) | null };
+    if ('bannerSink' in fxs) fxs.bannerSink = (str: string) => this.announce(str, 'buff');
     this.world.setBiome(getBiome('biome_pines'), 1);
     this.renderer.applyBiome(this.world.biome);
     this.renderer.lighting.attachLantern(this.player.light, this.player.group);
@@ -277,7 +282,10 @@ export class Game implements GameContext {
       if (kind === 'ember') this.audio.play('pickup');
       else if (kind === 'ash') this.audio.play('pickup_ash');
     });
-    ev.on('chest:opened', () => this.openChest());
+    ev.on('chest:opened', () => {
+      if (this.outroT > 0) this.chestQueued = true; // BUG-QA-025: never freeze the boss collapse
+      else this.openChest();
+    });
     ev.on('weapon:fired', ({ weaponId }) => this.audio.playWeapon(weaponId));
     ev.on('weapon:evolved', ({ from, name }) => {
       const base = getWeapon(from)?.name ?? from;
@@ -344,6 +352,7 @@ export class Game implements GameContext {
     this.outroT = 0;
     this.slowT = 0;
     this.dawnBoss = '';
+    this.chestQueued = false;
     this.lastChest = null;
     this.lastDawn = null;
     this.chestTimer = 0;
@@ -555,6 +564,7 @@ export class Game implements GameContext {
   /** After the boss falls: end victorious, or keep the lantern burning in the endless night. */
   private openDawnChoice(): void {
     this.dawnPending = false;
+    this.slowT = 0; // BUG-QA-026: unused boss slow-mo must not outlive the dawn screen
     if (this.state === 'gameover' || this.state === 'menu') return;
     this.state = 'levelup';
     this.levelMode = 'dawn';
@@ -662,7 +672,10 @@ export class Game implements GameContext {
   private updateRun(dt: number): void {
     const run = this.run;
     run.elapsed += dt;
-    if (this.outroT > 0) this.outroT -= dt;
+    if (this.outroT > 0) {
+      this.outroT -= dt;
+      if (this.outroT <= 0) this.slowT = 0; // BUG-QA-026: the collapse is over — back to full speed
+    }
     this.player.update(dt, this, this.time);
     this.world.update(this.player.x, this.player.z);
     this.director.update(dt, this);
@@ -687,6 +700,11 @@ export class Game implements GameContext {
       return;
     }
     if (this.state !== 'playing' || this.outroT > 0) return; // boss collapse outro: no choice screens yet
+    if (this.chestQueued) {
+      this.chestQueued = false;
+      this.openChest();
+      return;
+    }
     if (run.pendingLevelUps > 0) this.openLevelUp();
     else if (this.dawnPending) this.openDawnChoice();
   }

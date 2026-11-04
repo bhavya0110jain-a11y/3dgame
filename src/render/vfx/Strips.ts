@@ -266,6 +266,11 @@ interface Trail {
 /** Pooled world-space ribbon trails (cinder halo orbs etc.). Owners push a point per frame; released trails shrink away. */
 export class Ribbons {
   private trails: Trail[] = [];
+  /**
+   * Brightness-governor gain (FxManager writes it every frame). Ribbons are multiplied by it on top of the strips'
+   * uGain, so orbiting trails fall with gain² (0.09 at the 0.3 floor) — art review s3 #1d.
+   */
+  gain = 1;
   constructor(capacity = 32) {
     for (let i = 0; i < capacity; i++) {
       this.trails.push({ used: false, releasing: false, n: 0, head: 0, color: 0xffffff, width: 0.3, intensity: 1, hist: new Float32Array(TRAIL_PTS * 3), out: new Float32Array(TRAIL_PTS * 3) });
@@ -319,7 +324,7 @@ export class Ribbons {
         const k = ((t.head - i + TRAIL_PTS) % TRAIL_PTS) * 3;
         t.out[i * 3] = t.hist[k]; t.out[i * 3 + 1] = t.hist[k + 1]; t.out[i * 3 + 2] = t.hist[k + 2];
       }
-      strips.strip(t.out, t.n, t.width, t.width * 0.15, t.color, t.intensity, 1, 0, 0.55);
+      strips.strip(t.out, t.n, t.width, t.width * 0.15, t.color, t.intensity * this.gain, 1, 0, 0.55);
     }
   }
 }

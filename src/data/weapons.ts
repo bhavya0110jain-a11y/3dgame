@@ -73,7 +73,7 @@ class CinderHalo implements WeaponInstance {
     const s = ctx.run.stats;
     const n = this.count(ctx);
     if (this.trails.length !== n) {
-      while (this.trails.length < n) this.trails.push(ctx.fx.ribbons.alloc(0xff6a2a, 0.5 * Math.sqrt(ctx.run.stats.area), 2.2));
+      while (this.trails.length < n) this.trails.push(ctx.fx.ribbons.alloc(0xff6a2a, 0.5 * Math.sqrt(ctx.run.stats.area), 1.4)); // s3: 2.2 → 1.4
       while (this.trails.length > n) ctx.fx.ribbons.release(this.trails.pop()!);
       for (const t of this.trails) ctx.fx.ribbons.reset(t);
     }

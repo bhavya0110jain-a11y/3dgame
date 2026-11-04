@@ -149,3 +149,15 @@ describe('Save: round trip', () => {
     expect(s.settings.quality).toBe('low');
   });
 });
+
+describe('sanitizeSave: damage-number mode (art review s3 #12)', () => {
+  it('sanitizeSave_legacyBooleanDamageNumbers_mapsToAllOrOff', () => {
+    expect(sanitizeSave({ settings: { damageNumbers: true } }).settings.damageNumbers).toBe('all');
+    expect(sanitizeSave({ settings: { damageNumbers: false } }).settings.damageNumbers).toBe('off');
+  });
+  it('sanitizeSave_damageNumbersModeOrJunk_keptOrDefaulted', () => {
+    expect(sanitizeSave({ settings: { damageNumbers: 'crits' } }).settings.damageNumbers).toBe('crits');
+    expect(sanitizeSave({ settings: { damageNumbers: 'loud' } }).settings.damageNumbers).toBe('all');
+    expect(defaultSave().settings.damageNumbers).toBe('all');
+  });
+});

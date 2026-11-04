@@ -24,7 +24,7 @@ export const HINTS: Record<string, HintDef> = {
   damage: { id: 'damage', priority: 4, duration: 5, text: "Your light is your life — don't let it go out" },
   levelup: {
     id: 'levelup', priority: 3, duration: 7,
-    text: 'Choose a gift. A weapon at MAX level evolves when you also carry its paired relic',
+    text: 'Pick a gift. Max out a weapon, carry the relic its card names, and a reliquary evolves it',
   },
   oil: { id: 'oil', priority: 3, duration: 5, text: 'An oil flask! Grab it to refill your lantern' },
   lowlight: { id: 'lowlight', priority: 5, duration: 5, text: 'Your light is fading — keep moving and find oil' },

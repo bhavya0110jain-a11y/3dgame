@@ -40,7 +40,7 @@ afterEach(() => vi.restoreAllMocks());
 /** Headless context: real EnemyManager, a player stub that counts the hits it takes. */
 function makeCtx() {
   const save = defaultSave();
-  save.settings.damageNumbers = false;
+  save.settings.damageNumbers = 'off';
   const hits: number[] = [];
   const player = { x: 0, z: 0, vx: 0, vz: 0, radius: 0.5, lightValue: 100, invuln: 0, dead: false, damage: (a: number) => hits.push(a), heal: noop };
   const ctx = {

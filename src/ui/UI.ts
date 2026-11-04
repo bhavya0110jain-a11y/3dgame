@@ -80,6 +80,10 @@ export function announceKind(text: string, kind?: string): AnnounceKind {
   return 'info';
 }
 interface Announcement { text: string; kind: AnnounceKind; wait: number }
+/** While a boss is alive only 'boss' and 'buff' banners are shown (art review s3 #4). */
+export function announceAllowed(kind: AnnounceKind, bossUp: boolean): boolean {
+  return !bossUp || kind === 'boss' || kind === 'buff';
+}
 
 export function fmtTime(sec: number): string {
   const s = Math.max(0, Math.floor(sec));
@@ -656,15 +660,21 @@ export class UI {
    * Queues a world announcement banner ("An elite approaches…", "The dark closes in!"). Banners show one at a time,
    * ANNOUNCE_TIME s each, at ~22% of the screen height (under the dawn bar; never over the bearer). A banner waits
    * while an onboarding hint card is up (the card replaces it) and is dropped if it has waited ANNOUNCE_MAX_WAIT s.
-   * Duplicates of the current / a queued text are ignored; 'boss' banners jump the queue. `kind` picks the accent
+   * Duplicates of the current / a queued text are ignored; 'boss' banners jump the queue but keep their own order
+   * (BUG-QA-024: 'stirs…' → 'has come' → 'is enraged!'). While the night's master is alive only 'boss' and 'buff'
+   * banners are shown (art review s3 #4: the boss is the event; elite / swarm callouts would sit on its crown).
+   * 'boss' and 'elite' banners wait for a hint card without ageing (BUG-QA-027). `kind` picks the accent
    * (info | elite | boss | danger | buff) and is guessed from the text when omitted. Safe to call at any time.
    */
   announce(text: string, kind?: AnnounceKind | string): void {
     if (typeof text !== 'string' || !text.trim()) return;
     if (this.annCur?.text === text || this.annQ.some((a) => a.text === text)) return;
     const a: Announcement = { text, kind: announceKind(text, kind), wait: 0 };
-    if (a.kind === 'boss') this.annQ.unshift(a);
-    else this.annQ.push(a);
+    if (!announceAllowed(a.kind, this.bossAlive())) return;
+    if (a.kind === 'boss') {
+      const i = this.annQ.findIndex((q) => q.kind !== 'boss');
+      this.annQ.splice(i < 0 ? this.annQ.length : i, 0, a);
+    } else this.annQ.push(a);
     if (this.annQ.length > ANNOUNCE_QUEUE) this.annQ.length = ANNOUNCE_QUEUE;
   }
 
@@ -681,9 +691,12 @@ export class UI {
       if (this.annT >= ANNOUNCE_TIME || (this.hintCur && this.annT < ANNOUNCE_TIME - 0.3)) this.endAnnounce();
       return;
     }
+    const bossUp = this.bossAlive();
     for (let i = this.annQ.length - 1; i >= 0; i--) {
-      this.annQ[i].wait += dt;
-      if (this.annQ[i].wait > ANNOUNCE_MAX_WAIT) this.annQ.splice(i, 1);
+      const q = this.annQ[i];
+      // BUG-QA-027: gameplay warnings are held (not aged) behind a first-run hint card; flavour still expires
+      if (!(this.hintCur && (q.kind === 'boss' || q.kind === 'elite'))) q.wait += dt;
+      if (q.wait > ANNOUNCE_MAX_WAIT || !announceAllowed(q.kind, bossUp)) this.annQ.splice(i, 1);
     }
     if (this.annGap > 0) {
       this.annGap -= dt;
@@ -699,6 +712,12 @@ export class UI {
     void this.annEl.offsetWidth; // restart the pop-in
     this.annEl.classList.add('visible');
     this.root.classList.add('announcing');
+  }
+
+  /** Is the night's master on the field (the boss bar is up)? */
+  private bossAlive(): boolean {
+    const b = (this.game as { enemies?: { boss?: { hp: number } | null } }).enemies?.boss;
+    return !!b && b.hp > 0;
   }
 
   private endAnnounce(): void {
@@ -765,10 +784,11 @@ export class UI {
               <button class="btn btn-mini" data-act="credits">${icon('scroll')}<span>Credits</span></button>
             </div>
           </nav>
-          <div class="menu-stats">
+          <div class="menu-stats">${save.runs > 0 ? `
             <span class="chip">${icon('timer')}<small>Best</small><b>${fmtTime(save.bestTime)}</b></span>
             <span class="chip">${icon('skull')}<small>Most</small><b>${save.bestKills.toLocaleString()}</b></span>
-            <span class="chip">${icon('star')}<small>Kept</small><b>${save.victories}</b></span>
+            <span class="chip">${icon('star')}<small>Kept</small><b>${save.victories}</b></span>` : `
+            <span class="chip chip-first">${icon('wick')}<b>Your first vigil awaits</b></span>`}
           </div>
         </div>
         ${this.prompts([['A', 'Enter', 'Select'], ['D-pad', '↑↓', 'Move']])}
@@ -1157,7 +1177,7 @@ export class UI {
             toggle('reducedFlashing', 'Reduce Flashing', 'Calmer warnings and hit flashes.') +
             toggle('colorBlind', 'Colour-blind Highlights', 'High-contrast rarity and warning colours.') +
             toggle('reducedMotion', 'Reduce Motion', 'Fewer UI animations.') +
-            toggle('damageNumbers', 'Damage Numbers') +
+            seg('damageNumbers', 'Damage Numbers', [['all', 'All'], ['crits', 'Crits only'], ['off', 'Off']], 'Crits only keeps big hits, hides the rest.') +
             toggle('screenShake', 'Screen Shake');
       }
     };

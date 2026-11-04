@@ -245,7 +245,7 @@ export class Grass {
         );
     };
     mat.customProgramCacheKey = () => (flower ? 'll-flowers' : 'll-grass');
-    return patchWorldMaterial(mat, { gloom: flower ? 0.45 : 1 });
+    return patchWorldMaterial(mat, { gloom: flower ? 0.45 : 1, hotspot: 0.6 });
   }
 
   /**
